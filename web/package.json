@@ -1,9 +1,25 @@
 {
   "name":"pulseshift-web",
   "private":true,
-  "version":"0.2.0",
+  "version":"0.3.0",
   "type":"module",
-  "scripts":{"dev":"vite","build":"tsc -b && vite build","preview":"vite preview"},
-  "dependencies":{"@vitejs/plugin-react":"latest","lightweight-charts":"latest","lucide-react":"latest","react":"latest","react-dom":"latest","vite":"latest"},
-  "devDependencies":{"@types/react":"latest","@types/react-dom":"latest","typescript":"latest"}
+  "scripts":{
+    "dev":"vite",
+    "build":"tsc -b && vite build",
+    "preview":"vite preview",
+    "skill:install":"npx skills add https://github.com/Leonxlnx/taste-skill --skill design-taste-frontend"
+  },
+  "dependencies":{
+    "@vitejs/plugin-react":"latest",
+    "lightweight-charts":"latest",
+    "lucide-react":"latest",
+    "react":"latest",
+    "react-dom":"latest",
+    "vite":"latest"
+  },
+  "devDependencies":{
+    "@types/react":"latest",
+    "@types/react-dom":"latest",
+    "typescript":"latest"
+  }
 }

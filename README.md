@@ -11,7 +11,7 @@ PulseShift runs on your own computer, pulls public BTC/USDT market data from Bin
 - Live paper account with simulated fills and fees
 - EMA Momentum strategy with transparent confidence factors
 - Manual paper Buy / Sell / Close controls
-- Historical candle loading and replay/backtest endpoint
+- Historical candle loading and quick backtest endpoint
 - Strategy metrics: return, trades, win rate, drawdown, profit factor
 - API-first strategy interface ready for Jev, Laya, and future research policies
 - No Binance account, API key, cloud database, or VPS required
@@ -58,7 +58,7 @@ FastAPI
    +-- Replay/backtest runner
 ```
 
-The MVP deliberately keeps market data and account state in memory. Persistent Parquet/DuckDB recording is the next storage milestone once the live/replay workflow is validated.
+The MVP deliberately keeps market data and account state in memory. Persistent Parquet/DuckDB recording and a time-controlled replay screen are the next storage/replay milestones once the live paper workflow is validated.
 
 ## Safety
 

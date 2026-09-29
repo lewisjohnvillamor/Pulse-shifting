@@ -1,7 +1,7 @@
-import React,{useEffect,useMemo,useRef,useState} from 'react';
+import React,{useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {createChart,CandlestickSeries} from 'lightweight-charts';
-import {Activity,BrainCircuit,FlaskConical,Play,RotateCcw,ShieldCheck,TrendingUp,WalletCards} from 'lucide-react';
+import {Activity,BarChart3,BrainCircuit,FlaskConical,Play,RefreshCw,RotateCcw,WalletCards} from 'lucide-react';
 import './styles.css';
 
 type Candle={open_time:number;open:number;high:number;low:number;close:number;volume:number;close_time:number};
@@ -11,33 +11,90 @@ const money=(n:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency
 const pct=(n:number)=>Number(n||0).toFixed(2)+'%';
 
 function App(){
- const [data,setData]=useState<MarketData|null>(null); const [error,setError]=useState(''); const [bt,setBt]=useState<any>(null); const [amount,setAmount]=useState(250); const chartRef=useRef<HTMLDivElement>(null);
+ const [data,setData]=useState<MarketData|null>(null);
+ const [error,setError]=useState('');
+ const [bt,setBt]=useState<any>(null);
+ const [amount,setAmount]=useState(250);
+ const chartRef=useRef<HTMLDivElement>(null);
+
  const refresh=async()=>{try{const r=await fetch(API+'/api/market');if(!r.ok)throw new Error(await r.text());setData(await r.json());setError('')}catch(e:any){setError(e.message)}};
  useEffect(()=>{refresh();const id=setInterval(refresh,5000);return()=>clearInterval(id)},[]);
- useEffect(()=>{if(!chartRef.current||!data?.candles)return;chartRef.current.innerHTML='';const chart=createChart(chartRef.current,{height:410,layout:{background:{color:'#0A0D12'},textColor:'#7f8aa3'},grid:{vertLines:{color:'#171c25'},horzLines:{color:'#171c25'}},rightPriceScale:{borderColor:'#202633'},timeScale:{borderColor:'#202633',timeVisible:true,secondsVisible:false}});const series=chart.addSeries(CandlestickSeries,{upColor:'#38d996',downColor:'#ff6b7a',wickUpColor:'#38d996',wickDownColor:'#ff6b7a',borderVisible:false});series.setData(data.candles.map(c=>({time:(c.open_time/1000) as any,open:c.open,high:c.high,low:c.low,close:c.close})));chart.timeScale().fitContent();const obs=new ResizeObserver(()=>chart.applyOptions({width:chartRef.current?.clientWidth||800}));obs.observe(chartRef.current);return()=>{obs.disconnect();chart.remove()}},[data?.candles]);
- const order=async(side:string)=>{const r=await fetch(API+'/api/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({side,amount_usd:amount})});if(!r.ok){alert((await r.json()).detail||'Order failed')}refresh()};
+ useEffect(()=>{if(!chartRef.current||!data?.candles)return;chartRef.current.innerHTML='';const chart=createChart(chartRef.current,{height:430,layout:{background:{color:'#ffffff'},textColor:'#6b7280',fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace'},grid:{vertLines:{color:'#f0f2f5'},horzLines:{color:'#f0f2f5'}},rightPriceScale:{borderColor:'#e5e7eb'},timeScale:{borderColor:'#e5e7eb',timeVisible:true,secondsVisible:false}});const series=chart.addSeries(CandlestickSeries,{upColor:'#168b6a',downColor:'#c44f5e',wickUpColor:'#168b6a',wickDownColor:'#c44f5e',borderVisible:false});series.setData(data.candles.map(c=>({time:(c.open_time/1000) as any,open:c.open,high:c.high,low:c.low,close:c.close})));chart.timeScale().fitContent();const obs=new ResizeObserver(()=>chart.applyOptions({width:chartRef.current?.clientWidth||900}));obs.observe(chartRef.current);return()=>{obs.disconnect();chart.remove()}},[data?.candles]);
+
+ const order=async(side:string)=>{const r=await fetch(API+'/api/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({side,amount_usd:amount})});if(!r.ok){setError((await r.json()).detail||'Order failed');return}setError('');refresh()};
  const runBt=async()=>{const r=await fetch(API+'/api/backtest?interval=5m&limit=500');setBt(await r.json())};
- if(!data)return <div className="loading">PulseShift · connecting to local quant engine…<small>{error}</small></div>;
+
+ if(!data)return <div className="loading"><span>PulseShift</span><small>Connecting to the local quant engine…</small>{error&&<em>{error}</em>}</div>;
  const d=data.decision,a=data.account,m=data.market;
- return <div className="shell">
-   <header className="topbar"><div className="brand"><div className="mark">PS</div><div><b>PULSESHIFT</b><span>LOCAL QUANT LAB</span></div></div><nav><button className="active">Terminal</button><button>Replay</button><button>Research</button></nav><div className="status"><span className="dot"/> PAPER · BINANCE</div></header>
+ return <div className="appShell">
+   <header className="topbar">
+    <div className="brand"><div className="brandMark">P</div><div><strong>PulseShift</strong><span>Local quant research</span></div></div>
+    <nav><button className="active">Terminal</button><button disabled>Replay</button><button disabled>Research</button></nav>
+    <div className="marketStatus"><span className="statusDot"/> Paper trading <span>·</span> Binance</div>
+   </header>
+
    <main className="workspace">
-    <section className="heroCard panel">
-      <div className="instrument"><div><span className="eyebrow">SPOT / BTCUSDT</span><h1>{money(m.price)}</h1><div className={m.change_24h_pct>=0?'positive':'negative'}>{m.change_24h_pct>=0?'+':''}{pct(m.change_24h_pct)} · 24H</div></div><div className="quoteStrip"><Metric label="Bid" value={money(m.bid)}/><Metric label="Ask" value={money(m.ask)}/><Metric label="Spread" value={m.spread_bps.toFixed(2)+' bps'}/></div></div>
-      <div ref={chartRef} className="chart"/>
-      <div className="chartFooter"><span>1m · 120 candles</span><span>Auto refresh 5s</span></div>
+    <section className="overview panel">
+      <div className="assetBlock"><span>BTC / USDT</span><strong>{money(m.price)}</strong><small className={m.change_24h_pct>=0?'up':'down'}>{m.change_24h_pct>=0?'+':''}{pct(m.change_24h_pct)} today</small></div>
+      <Stat label="Bid" value={money(m.bid)}/>
+      <Stat label="Ask" value={money(m.ask)}/>
+      <Stat label="Spread" value={m.spread_bps.toFixed(2)+' bps'}/>
+      <Stat label="24h quote volume" value={money(m.volume_24h)}/>
+      <button className="iconButton" onClick={refresh} title="Refresh"><RefreshCw size={16}/></button>
     </section>
-    <aside className="rail">
-      <div className="panel decisionCard"><div className="sectionTitle"><BrainCircuit size={16}/> Strategy intelligence</div><div className="decisionRow"><div><span>Action</span><strong className={d.action==='LONG'?'positive':d.action==='SHORT'?'negative':''}>{d.action}</strong></div><div className="model">{data.strategy}</div></div><Gauge label="Signal confidence" value={d.confidence}/><Gauge label="Regime confidence" value={d.regime_confidence}/><Gauge label="Execution quality" value={d.execution_confidence}/><div className="regime"><span>Regime</span><b>{d.regime}</b></div><div className="reasonList">{d.reasons.map((r:string)=><div key={r}><span className="bullet"/>{r}</div>)}</div></div>
-      <div className="panel accountCard"><div className="sectionTitle"><WalletCards size={16}/> Paper portfolio</div><div className="equity">{money(a.equity)}<span className={a.total_return_pct>=0?'positive':'negative'}>{pct(a.total_return_pct)}</span></div><div className="accountGrid"><Metric label="Cash" value={money(a.cash)}/><Metric label="BTC" value={Number(a.btc_qty).toFixed(6)}/><Metric label="Entry" value={a.entry_price?money(a.entry_price):'—'}/><Metric label="Unrealized" value={money(a.unrealized_pnl)}/></div></div>
-      <div className="panel orderCard"><div className="sectionTitle"><ShieldCheck size={16}/> Paper execution</div><label>Notional (USDT)</label><input type="number" value={amount} min={10} step={10} onChange={e=>setAmount(Number(e.target.value))}/><div className="orderButtons"><button className="buy" onClick={()=>order('BUY')}>Buy BTC</button><button className="sell" onClick={()=>order('SELL')}>Sell BTC</button></div><button className="secondary" onClick={()=>order('CLOSE')}>Close position</button><button className="reset" onClick={async()=>{await fetch(API+'/api/reset',{method:'POST'});refresh()}}><RotateCcw size={14}/> Reset account</button></div>
-    </aside>
-    <section className="panel activityPanel"><div className="sectionTitle"><Activity size={16}/> Execution ledger</div><div className="tableWrap"><table><thead><tr><th>Time</th><th>Side</th><th>Qty BTC</th><th>Price</th><th>Fee</th><th>P&L</th></tr></thead><tbody>{a.trades.length?a.trades.map((t:any)=><tr key={t.ts}><td>{new Date(t.ts).toLocaleTimeString()}</td><td className={t.side==='BUY'?'positive':'negative'}>{t.side}</td><td>{Number(t.qty).toFixed(6)}</td><td>{money(t.price)}</td><td>{money(t.fee)}</td><td>{money(t.pnl)}</td></tr>):<tr><td colSpan={6} className="empty">No paper executions yet.</td></tr>}</tbody></table></div></section>
-    <section className="panel labPanel"><div className="labHead"><div><div className="sectionTitle"><FlaskConical size={16}/> Strategy arena</div><p>Quick baseline validation using the same Python strategy engine.</p></div><button onClick={runBt}><Play size={14}/> Run 500 × 5m</button></div>{bt&&<div className="metricGrid"><Metric label="Return" value={pct(bt.return_pct)}/><Metric label="Round trips" value={String(bt.round_trips)}/><Metric label="Win rate" value={pct(bt.win_rate_pct)}/><Metric label="Max drawdown" value={pct(bt.max_drawdown_pct)}/><Metric label="Profit factor" value={bt.profit_factor??'—'}/></div>}</section>
+
+    <section className="mainGrid">
+      <article className="chartPanel panel">
+        <div className="panelHeader"><div><span className="kicker">Market</span><h2>BTC/USDT</h2></div><div className="intervals"><button className="active">1m</button><button disabled>5m</button><button disabled>15m</button><button disabled>1h</button></div></div>
+        <div ref={chartRef} className="chart"/>
+        <div className="chartFooter"><span>120 candles</span><span>Refreshes every 5 seconds</span></div>
+      </article>
+
+      <aside className="sideColumn">
+        <section className="panel intelligence">
+          <div className="panelHeader compact"><div><span className="kicker">Model</span><h2>Strategy intelligence</h2></div><BrainCircuit size={18}/></div>
+          <div className="decision"><div><span>Current action</span><strong className={d.action==='LONG'?'up':d.action==='SHORT'?'down':''}>{d.action}</strong></div><small>{data.strategy}</small></div>
+          <Gauge label="Signal confidence" value={d.confidence}/>
+          <Gauge label="Regime fit" value={d.regime_confidence}/>
+          <Gauge label="Execution quality" value={d.execution_confidence}/>
+          <div className="regimeRow"><span>Market regime</span><strong>{d.regime}</strong></div>
+          <ul className="reasons">{d.reasons.map((r:string)=><li key={r}>{r}</li>)}</ul>
+        </section>
+
+        <section className="panel portfolio">
+          <div className="panelHeader compact"><div><span className="kicker">Paper account</span><h2>Portfolio</h2></div><WalletCards size={18}/></div>
+          <div className="equityRow"><strong>{money(a.equity)}</strong><span className={a.total_return_pct>=0?'up':'down'}>{pct(a.total_return_pct)}</span></div>
+          <div className="twoCol"><Stat label="Cash" value={money(a.cash)}/><Stat label="BTC position" value={Number(a.btc_qty).toFixed(6)}/><Stat label="Entry" value={a.entry_price?money(a.entry_price):'—'}/><Stat label="Unrealized P&L" value={money(a.unrealized_pnl)}/></div>
+        </section>
+
+        <section className="panel execution">
+          <div className="panelHeader compact"><div><span className="kicker">Simulator</span><h2>Paper execution</h2></div><BarChart3 size={18}/></div>
+          <label>Notional (USDT)</label><input type="number" value={amount} min={10} step={10} onChange={e=>setAmount(Number(e.target.value))}/>
+          <div className="tradeButtons"><button className="buy" onClick={()=>order('BUY')}>Buy BTC</button><button className="sell" onClick={()=>order('SELL')}>Sell BTC</button></div>
+          <button className="secondary" onClick={()=>order('CLOSE')}>Close position</button>
+          <button className="linkButton" onClick={async()=>{await fetch(API+'/api/reset',{method:'POST'});refresh()}}><RotateCcw size={14}/> Reset paper account</button>
+          {error&&<div className="inlineError">{error}</div>}
+        </section>
+      </aside>
+    </section>
+
+    <section className="bottomGrid">
+      <section className="panel ledger">
+        <div className="panelHeader"><div><span className="kicker">Activity</span><h2>Execution ledger</h2></div><Activity size={18}/></div>
+        <div className="tableWrap"><table><thead><tr><th>Time</th><th>Side</th><th>Qty BTC</th><th>Price</th><th>Fee</th><th>P&L</th></tr></thead><tbody>{a.trades.length?a.trades.map((t:any)=><tr key={t.ts}><td>{new Date(t.ts).toLocaleTimeString()}</td><td className={t.side==='BUY'?'up':'down'}>{t.side}</td><td>{Number(t.qty).toFixed(6)}</td><td>{money(t.price)}</td><td>{money(t.fee)}</td><td>{money(t.pnl)}</td></tr>):<tr><td colSpan={6} className="empty">No paper executions yet. Use the simulator to create the first trade.</td></tr>}</tbody></table></div>
+      </section>
+
+      <section className="panel arena">
+        <div className="panelHeader"><div><span className="kicker">Research</span><h2>Strategy arena</h2></div><button className="runButton" onClick={runBt}><Play size={14}/> Run baseline</button></div>
+        <p>Run the EMA Momentum baseline across the latest 500 five-minute candles.</p>
+        {bt?<div className="arenaStats"><Stat label="Return" value={pct(bt.return_pct)}/><Stat label="Round trips" value={String(bt.round_trips)}/><Stat label="Win rate" value={pct(bt.win_rate_pct)}/><Stat label="Max drawdown" value={pct(bt.max_drawdown_pct)}/><Stat label="Profit factor" value={bt.profit_factor??'—'}/></div>:<div className="arenaEmpty"><FlaskConical size={20}/><span>No experiment results yet</span></div>}
+      </section>
+    </section>
    </main>
-   {error&&<div className="errorBar">{error}</div>}
  </div>
 }
-function Metric({label,value}:{label:string,value:string}){return <div className="metric"><span>{label}</span><b>{value}</b></div>}
-function Gauge({label,value}:{label:string,value:number}){return <div className="gauge"><div><span>{label}</span><b>{Math.round(value*100)}%</b></div><div className="track"><i style={{width:Math.max(0,Math.min(100,value*100))+'%'}}/></div></div>}
+
+function Stat({label,value}:{label:string,value:string}){return <div className="stat"><span>{label}</span><strong>{value}</strong></div>}
+function Gauge({label,value}:{label:string,value:number}){return <div className="gauge"><div><span>{label}</span><strong>{Math.round(value*100)}%</strong></div><div className="track"><i style={{width:Math.max(0,Math.min(100,value*100))+'%'}}/></div></div>}
+
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

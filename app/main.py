@@ -5,6 +5,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -25,7 +26,15 @@ async def lifespan(app: FastAPI):
     await market.close()
 
 
-app = FastAPI(title="PulseShift", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="PulseShift", version="0.2.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class OrderIn(BaseModel):
@@ -40,7 +49,7 @@ async def index():
 
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "mode": "paper", "version": "0.1.0"}
+    return {"ok": True, "mode": "paper", "version": "0.2.0"}
 
 
 @app.get("/api/market")

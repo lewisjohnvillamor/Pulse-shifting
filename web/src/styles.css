@@ -1091,3 +1091,46 @@ td {
   align-items: center;
   gap: 4px;
 }
+
+/* --- v0.8: uniform card padding --- */
+.panel:not(.overview)
+  > *:not(.panelHeader):not(.chart):not(.tableWrap):not(.dragHint) {
+  padding-left: 14px;
+  padding-right: 14px;
+}
+.panel:not(.overview) > .tableWrap {
+  padding: 0 10px 10px;
+}
+.panel:not(.overview) > .chart {
+  padding: 0 6px;
+}
+.panel:not(.overview) {
+  padding-bottom: 10px;
+}
+.boardRows {
+  margin: 4px 0 8px;
+}
+.chartFooter {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: #6b7280;
+}
+.patternTags {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.patternTag {
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.patternTag.bullish {
+  color: #168b6a;
+  border-color: #bfe6d8;
+}
+.patternTag.bearish {
+  color: #c44f5e;
+  border-color: #f2c9cf;
+}

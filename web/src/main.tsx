@@ -258,6 +258,7 @@ function App() {
           decision: packet.decision || current.decision,
           decisions: packet.decisions || current.decisions,
           edge: packet.edge || current.edge,
+          patterns: packet.patterns || current.patterns,
           account: packet.account || current.account,
           stream_connected: packet.stream_connected,
         };
@@ -614,6 +615,22 @@ function App() {
               <div className="chartFooter">
                 <span>{data.candles.length} candles</span>
                 <span>Streaming live</span>
+                <span className="patternTags">
+                  {(data.patterns?.patterns || []).map((p: any) => (
+                    <em key={p.name} className={`patternTag ${p.bias}`}>
+                      {p.name} → entry {p.entry}
+                    </em>
+                  ))}
+                  {(data.patterns?.levels || []).map((l: any) => (
+                    <em key={l.price} className="patternTag">
+                      {l.kind} {l.price}
+                    </em>
+                  ))}
+                  {!data.patterns?.patterns?.length &&
+                    !data.patterns?.levels?.length && (
+                      <em>No patterns detected right now</em>
+                    )}
+                </span>
               </div>
             </article>
 

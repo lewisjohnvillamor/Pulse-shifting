@@ -109,3 +109,38 @@ The next major build should be **persistent market recording + deterministic rep
 ## Safety
 
 PulseShift is a research and simulation tool. The current build does **not** place real exchange orders. Keep paper and live broker layers physically separated and validate strategies out-of-sample before considering real-capital use.
+
+
+## Evolutionary strategy discovery
+
+PulseShift can now mutate any parameterized strategy from the Strategy Arena. The first strategy designed for this workflow is **AI Regime Fusion v1**.
+
+The discovery loop is deliberately constrained:
+
+1. Load up to 1,000 historical candles.
+2. Split them chronologically into 60% train, 20% validation, and 20% holdout test.
+3. Generate bounded parameter mutations from the current strategy genome.
+4. Rank each generation using return, drawdown, profit factor, trade-count, and train/validation stability.
+5. Keep the strongest elites and mutate them again.
+6. Reveal the holdout test only after the final champion has been selected.
+7. Require a manual **Promote champion** action before evolved parameters replace the current local strategy configuration.
+
+Default UI experiment:
+
+- 4 generations
+- 16 candidates per generation
+- 20% elite retention
+- 35% mutation probability per gene
+- 10% parameter-range mutation scale
+- deterministic seed 42
+
+Evolution runs in a worker thread so the live Binance market feed remains responsive. Promotion only changes the local paper-trading strategy configuration; it does not enable live exchange execution.
+
+API:
+
+```text
+POST /api/evolution/run
+POST /api/evolution/promote/{strategy_id}
+```
+
+The holdout result is evidence for comparison, not proof of future profitability. Re-run promising genomes across different symbols, periods, intervals, and market regimes before treating them as robust.

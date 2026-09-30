@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from .backtest import run_backtest
 from .live_market import MarketHub, SymbolFeed
 from .market import BinancePublicClient, MarketSnapshot, normalize_symbol
+from .monitor import SignalMonitor
 from .paper import PaperBroker
 from .registry import StrategyRegistry
 from .signals import edge_assessment
@@ -24,6 +25,7 @@ market = BinancePublicClient()
 broker = PaperBroker()
 hub = MarketHub(market)
 watchlist = Watchlist(DATA_DIR / "watchlist.json")
+monitor = SignalMonitor(DATA_DIR / "monitor")
 registry = StrategyRegistry(
     plugin_dir=BASE_DIR.parent / "strategies",
     params_file=DATA_DIR / "strategy_params.json",
@@ -61,6 +63,10 @@ class PinIn(BaseModel):
 
 class ParamsIn(BaseModel):
     params: dict[str, float]
+
+
+class MonitorIn(BaseModel):
+    enabled: bool
 
 
 def _clean_symbol(symbol: str) -> str:
@@ -112,23 +118,27 @@ def _market_payload(feed: SymbolFeed, snapshot: MarketSnapshot) -> dict:
     primary_id = next(iter(registry.strategies), None)
     decision = decisions.get(primary_id) if primary_id else None
     primary = registry.get(primary_id) if primary_id else None
-    return {
+    edge = edge_assessment(
+        candles,
+        snapshot,
+        None if primary is None else _decision_obj(decision),
+        fee_bps=broker.fee_bps,
+    )
+    payload = {
         "market": snapshot.as_dict(),
         "decision": decision,
         "decisions": decisions,
-        "edge": edge_assessment(
-            candles,
-            snapshot,
-            None if primary is None else _decision_obj(decision),
-            fee_bps=broker.fee_bps,
-        ),
+        "edge": edge,
         "account": broker.snapshot(_price_map(), snapshot.symbol),
         "candles": candles[-120:],
         "strategies": [s["id"] for s in registry.describe()],
         "mode": "PAPER",
         "stream_connected": feed.connected,
         "stream_last_event_ms": feed.last_event_ms,
+        "monitoring": monitor.is_enabled(snapshot.symbol),
     }
+    monitor.record(snapshot.symbol, payload)
+    return payload
 
 
 def _decision_obj(d: dict | None):
@@ -235,6 +245,34 @@ async def reload_strategies():
     return {"strategies": [s["id"] for s in registry.describe()]}
 
 
+@app.post("/api/monitor/{symbol}")
+async def set_monitor(symbol: str, body: MonitorIn):
+    symbol = _clean_symbol(symbol)
+    if body.enabled:
+        await _feed_for(symbol)
+    monitor.set_enabled(symbol, body.enabled)
+    return {
+        "symbol": symbol,
+        "enabled": monitor.is_enabled(symbol),
+        "monitoring": monitor.symbols(),
+    }
+
+
+@app.get("/api/monitor/{symbol}")
+async def get_monitor(symbol: str, limit: int = Query(default=50, le=200)):
+    symbol = _clean_symbol(symbol)
+    return {
+        "symbol": symbol,
+        "enabled": monitor.is_enabled(symbol),
+        "events": monitor.recent(symbol, limit),
+    }
+
+
+@app.get("/api/monitor")
+async def monitored_symbols():
+    return {"monitoring": monitor.symbols()}
+
+
 @app.get("/api/market")
 async def get_market(symbol: str = "BTCUSDT"):
     symbol = _clean_symbol(symbol)
@@ -316,7 +354,11 @@ async def backtest(
     interval: str = "5m",
     limit: int = 500,
     strategy: str | None = None,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
 ):
+    """Replay a strategy over historical klines. `start_ms`/`end_ms` are
+    epoch milliseconds — pick any point in the past Binance has data for."""
     symbol = _clean_symbol(symbol)
     instance = None
     if strategy:
@@ -324,11 +366,30 @@ async def backtest(
         if instance is None:
             raise HTTPException(status_code=404, detail=f"Unknown strategy: {strategy}")
     try:
-        candles = await market.klines(symbol, interval=interval, limit=limit)
+        candles = await market.klines(
+            symbol,
+            interval=interval,
+            limit=limit,
+            start_time=start_ms,
+            end_time=end_ms,
+        )
+        if len(candles) < 60:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only {len(candles)} candles in that window — widen it.",
+            )
         result = run_backtest(candles, strategy=instance)
         result["symbol"] = symbol
+        result["interval"] = interval
         result["strategy_id"] = strategy or "ema_momentum"
+        result["window"] = {
+            "start_ms": candles[0]["open_time"],
+            "end_ms": candles[-1]["close_time"],
+            "candles": len(candles),
+        }
         return result
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=502, detail=f"Backtest data unavailable: {exc}"

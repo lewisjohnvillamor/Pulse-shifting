@@ -38,6 +38,7 @@ class JsonStrategy(Strategy):
         self.description = raw.get("description", "")
         self.min_candles = template.min_candles
         self.specs = template.specs
+        self.styles = raw.get("styles") or template.styles
         super().__init__(raw.get("params"))
         self._template = template
         self._source = str(spec_file)
@@ -142,12 +143,15 @@ class StrategyRegistry:
                 "name": s.name,
                 "description": s.description,
                 "params": s.param_values() if hasattr(s, "param_values") else [],
+                "styles": getattr(s, "styles", ["scalping", "day"]),
                 "builtin": sid in BUILTINS,
             }
             for sid, s in sorted(self.strategies.items())
         ]
 
-    def configure(self, strategy_id: str, params: dict[str, float]) -> list[dict] | None:
+    def configure(
+        self, strategy_id: str, params: dict[str, float]
+    ) -> list[dict] | None:
         strategy = self.strategies.get(strategy_id)
         if strategy is None:
             return None

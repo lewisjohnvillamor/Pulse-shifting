@@ -341,9 +341,10 @@ def _halves(n: int) -> tuple[slice, slice]:
 
 def _report(name: str, pnl: np.ndarray, t: np.ndarray, per_year: float) -> None:
     a, b = _halves(len(pnl))
-    day = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).strftime(
-        "%Y-%m-%d"
-    )  # noqa: E731
+
+    def day(ms: int) -> str:
+        return datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%d")
+
     print(_fmt(f"{name} [in {day(t[0])}..]", stats(pnl[a], per_year)))
     print(_fmt(f"{name} [OUT {day(t[len(t) // 2])}..]", stats(pnl[b], per_year)))
 

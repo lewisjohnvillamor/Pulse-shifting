@@ -1211,7 +1211,6 @@ td {
   padding: 6px 10px;
 }
 
-
 /* --- v0.10: evolutionary strategy discovery --- */
 .discoverButton {
   border: 1px solid #c9d8e7;
@@ -1225,7 +1224,10 @@ td {
   font-size: 11px;
   font-weight: 650;
   cursor: pointer;
-  transition: background-color .18s ease, border-color .18s ease, transform .12s ease;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.12s ease;
 }
 .discoverButton:hover:not(:disabled) {
   background: #edf4fa;
@@ -1236,7 +1238,7 @@ td {
 }
 .discoverButton:disabled {
   cursor: wait;
-  opacity: .65;
+  opacity: 0.65;
 }
 .evolutionPanel {
   border-top: 1px solid var(--line2);
@@ -1253,7 +1255,7 @@ td {
 .evolutionHead h3 {
   margin: 2px 0 0;
   font-size: 14px;
-  letter-spacing: -.01em;
+  letter-spacing: -0.01em;
 }
 .promoteButton {
   border: 1px solid #bfdcca;
@@ -1306,7 +1308,11 @@ td {
 .generationCell strong {
   display: block;
   margin: 2px 0;
-  font: 650 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    650 12px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
 }
 .genomeDetails {
   margin-top: 12px;
@@ -1341,7 +1347,11 @@ td {
 }
 .genomeGrid strong {
   flex: 0 0 auto;
-  font: 600 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    600 9px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
 }
 .evolutionNote {
   margin: 10px 0 0 !important;
@@ -1359,4 +1369,50 @@ td {
   .genomeGrid {
     grid-template-columns: 1fr 1fr;
   }
+}
+
+/* Strategy signal overlay */
+.intervalDivider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 4px;
+  background: var(--line, #e5e7eb);
+}
+.chartLoading {
+  display: grid;
+  place-items: center;
+  min-height: 260px;
+  color: #6b7280;
+}
+.signalStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-top: 1px solid var(--line, #e5e7eb);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.signalStrip.muted {
+  color: #6b7280;
+}
+.signalStrip .pos {
+  color: #168b6a;
+}
+.signalStrip .neg {
+  color: #c44f5e;
+}
+.sigAction {
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: #eef2f7;
+}
+.sigAction.long {
+  background: #dcfce7;
+  color: #166534;
+}
+.sigAction.short {
+  background: #fee2e2;
+  color: #991b1b;
 }

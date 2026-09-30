@@ -15,6 +15,8 @@ STREAM_BASES = (
     "wss://data-stream.binance.vision/stream",
 )
 STREAM_KINDS = ("bookTicker", "ticker", "kline_1m")
+# Enough 1m history for the slowest model features (200-bar averages).
+LIVE_CANDLES = 500
 
 
 def stream_url(symbol: str, base: str) -> str:
@@ -39,7 +41,7 @@ class SymbolFeed:
 
     async def bootstrap(self) -> None:
         self.market = await self.rest.snapshot(self.symbol)
-        self.candles = await self.rest.klines(self.symbol, limit=120)
+        self.candles = await self.rest.klines(self.symbol, limit=LIVE_CANDLES)
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -143,6 +145,8 @@ class SymbolFeed:
             "close": float(kline["c"]),
             "volume": float(kline["v"]),
             "close_time": int(kline["T"]),
+            "trades": int(kline.get("n", 0)),
+            "taker_buy_volume": float(kline.get("V", 0.0)),
         }
 
         market = self._ensure_market()
@@ -153,7 +157,7 @@ class SymbolFeed:
             self.candles[-1] = candle
         else:
             self.candles.append(candle)
-            self.candles = self.candles[-120:]
+            self.candles = self.candles[-LIVE_CANDLES:]
 
     def current_candle(self) -> dict[str, float | int] | None:
         return self.candles[-1] if self.candles else None

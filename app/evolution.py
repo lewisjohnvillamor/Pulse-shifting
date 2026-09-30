@@ -132,11 +132,14 @@ def _evaluate(
     validation_candles: list[dict],
     generation: int,
     parent_rank: int | None = None,
+    validation_start: int = 30,
 ) -> Candidate:
     train_strategy = _instantiate(template, params)
     validation_strategy = _instantiate(template, params)
     train = run_backtest(train_candles, strategy=train_strategy)
-    validation = run_backtest(validation_candles, strategy=validation_strategy)
+    validation = run_backtest(
+        validation_candles, strategy=validation_strategy, start_index=validation_start
+    )
     return Candidate(
         params=copy.deepcopy(params),
         train=train,
@@ -177,11 +180,15 @@ def run_evolution(
     n = len(candles)
     train_end = int(n * 0.60)
     validation_end = int(n * 0.80)
+    # Validation/test slices carry the preceding `min_candles` as indicator
+    # history only (never traded), so slow-warming strategies can be scored.
     train = candles[:train_end]
-    validation = candles[train_end:validation_end]
-    test = candles[validation_end:]
+    val_lead = min(min_candles, train_end)
+    validation = candles[train_end - val_lead : validation_end]
+    test_lead = min(min_candles, validation_end)
+    test = candles[validation_end - test_lead :]
 
-    if min(len(train), len(validation), len(test)) < min_candles:
+    if min(len(train), validation_end - train_end, n - validation_end) < 30:
         raise ValueError("Each chronological split must contain enough candles")
 
     rng = random.Random(seed)
@@ -214,6 +221,7 @@ def run_evolution(
                 params,
                 train,
                 validation,
+                validation_start=val_lead,
                 generation=generation,
                 parent_rank=parent_rank,
             )
@@ -258,12 +266,16 @@ def run_evolution(
     champion = ranked[0]
     base_train = run_backtest(train, strategy=_instantiate(strategy, base_params))
     base_validation = run_backtest(
-        validation, strategy=_instantiate(strategy, base_params)
+        validation, strategy=_instantiate(strategy, base_params), start_index=val_lead
     )
 
     # Only now reveal the holdout test.
-    champion_test = run_backtest(test, strategy=_instantiate(strategy, champion.params))
-    base_test = run_backtest(test, strategy=_instantiate(strategy, base_params))
+    champion_test = run_backtest(
+        test, strategy=_instantiate(strategy, champion.params), start_index=test_lead
+    )
+    base_test = run_backtest(
+        test, strategy=_instantiate(strategy, base_params), start_index=test_lead
+    )
 
     return {
         "strategy_id": strategy.id,
@@ -276,8 +288,8 @@ def run_evolution(
         "mutation_scale": mutation_scale,
         "split": {
             "train": len(train),
-            "validation": len(validation),
-            "test": len(test),
+            "validation": validation_end - train_end,
+            "test": n - validation_end,
         },
         "base": {
             "params": base_params,

@@ -41,10 +41,15 @@ def run_backtest(
         if qty == 0:
             decision = strategy.decide(window, spread_bps=1.0)
             if decision.action == "LONG":
-                fee = cash * fee_bps / 10_000
-                qty = (cash - fee) / price
+                # Optional position sizing: levels["size"] = fraction of
+                # equity to deploy (e.g. volatility targeting); default all-in.
+                size = (decision.levels or {}).get("size", 1.0)
+                size = min(max(float(size), 0.0), 1.0) or 1.0
+                spend = cash * size
+                fee = spend * fee_bps / 10_000
+                qty = (spend - fee) / price
                 entry_price = price
-                cash = 0.0
+                cash -= spend
                 trades.append(
                     {
                         "side": "BUY",
@@ -57,7 +62,7 @@ def run_backtest(
         elif _should_exit(strategy, window):
             gross = qty * price
             fee = gross * fee_bps / 10_000
-            cash = gross - fee
+            cash += gross - fee
             pnl = (price - entry_price) * qty - fee
             trades.append(
                 {
@@ -77,7 +82,7 @@ def run_backtest(
         price = float(candles[-1]["close"])
         gross = qty * price
         fee = gross * fee_bps / 10_000
-        cash = gross - fee
+        cash += gross - fee
         pnl = (price - entry_price) * qty - fee
         trades.append(
             {

@@ -1416,3 +1416,56 @@ td {
   background: #fee2e2;
   color: #991b1b;
 }
+
+/* Trend portfolio panel */
+.trendPanel {
+  overflow: auto;
+}
+.trendExposure {
+  font-size: 12px;
+  font-weight: 650;
+  color: #1e3a8a;
+}
+.trendNote {
+  font-size: 11.5px;
+  color: #6b7280;
+  margin: 4px 0 8px;
+}
+.trendTable {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+.trendTable th {
+  text-align: left;
+  font-weight: 600;
+  color: #6b7280;
+}
+.trendTable td,
+.trendTable th {
+  padding: 3px 6px;
+}
+.trendTable tr.out {
+  color: #9ca3af;
+}
+.trendTable .up {
+  color: #168b6a;
+}
+.trendTable .down {
+  color: #c44f5e;
+}
+.weightBar {
+  display: inline-block;
+  width: 60px;
+  height: 6px;
+  margin-right: 6px;
+  background: #eef2f7;
+  border-radius: 3px;
+  vertical-align: middle;
+  overflow: hidden;
+}
+.weightBar i {
+  display: block;
+  height: 100%;
+  background: #2563eb;
+}

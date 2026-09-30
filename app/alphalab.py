@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import csv
 import io
-import json
 import math
 import time
 import zipfile
@@ -38,26 +37,53 @@ ARCHIVE = "https://data.binance.vision"
 # Survivorship bias: coins delisted since then are missing, which flatters
 # long-only and momentum results; treat absolute returns as optimistic.
 UNIVERSE = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT",
-    "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT", "LTCUSDT", "TRXUSDT",
-    "ATOMUSDT", "NEARUSDT", "UNIUSDT", "ETCUSDT", "XLMUSDT", "BCHUSDT",
-    "FILUSDT", "AAVEUSDT",
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "ADAUSDT",
+    "DOGEUSDT",
+    "AVAXUSDT",
+    "LINKUSDT",
+    "DOTUSDT",
+    "LTCUSDT",
+    "TRXUSDT",
+    "ATOMUSDT",
+    "NEARUSDT",
+    "UNIUSDT",
+    "ETCUSDT",
+    "XLMUSDT",
+    "BCHUSDT",
+    "FILUSDT",
+    "AAVEUSDT",
 ]
 START = "2020-09-01"  # every UNIVERSE coin trades on Binance spot by then
 
 DAY_MS = 86_400_000
-INTERVAL_MS = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000, "1d": DAY_MS}
+INTERVAL_MS = {
+    "1m": 60_000,
+    "5m": 300_000,
+    "15m": 900_000,
+    "1h": 3_600_000,
+    "1d": DAY_MS,
+}
 
 
 def _ms(date: str) -> int:
-    return int(datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000)
+    return int(
+        datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()
+        * 1000
+    )
 
 
 # --------------------------------------------------------------------------
 # Data
 
 
-def fetch_klines(symbol: str, interval: str, start: str, end_ms: int | None = None) -> dict:
+def fetch_klines(
+    symbol: str, interval: str, start: str, end_ms: int | None = None
+) -> dict:
     """Paginated spot klines as column arrays, cached on disk."""
     CACHE.mkdir(parents=True, exist_ok=True)
     path = CACHE / f"{symbol}_{interval}_{start}.npz"
@@ -73,7 +99,12 @@ def fetch_klines(symbol: str, interval: str, start: str, end_ms: int | None = No
                 try:
                     r = client.get(
                         "/api/v3/klines",
-                        params={"symbol": symbol, "interval": interval, "startTime": t, "limit": 1000},
+                        params={
+                            "symbol": symbol,
+                            "interval": interval,
+                            "startTime": t,
+                            "limit": 1000,
+                        },
                     )
                     r.raise_for_status()
                     page = r.json()
@@ -173,7 +204,9 @@ def stats(pnl: np.ndarray, periods_per_year: float) -> dict[str, float]:
     vol = pnl.std() * math.sqrt(periods_per_year)
     return {
         "total": round((equity[-1] - 1) * 100, 1),
-        "cagr": round((equity[-1] ** (1 / years) - 1) * 100, 1) if years > 0 and equity[-1] > 0 else -100.0,
+        "cagr": round((equity[-1] ** (1 / years) - 1) * 100, 1)
+        if years > 0 and equity[-1] > 0
+        else -100.0,
         "vol": round(vol * 100, 1),
         "sharpe": round(pnl.mean() * periods_per_year / vol, 2) if vol else 0.0,
         "max_dd": round((equity / peak - 1).min() * 100, 1),
@@ -308,7 +341,9 @@ def _halves(n: int) -> tuple[slice, slice]:
 
 def _report(name: str, pnl: np.ndarray, t: np.ndarray, per_year: float) -> None:
     a, b = _halves(len(pnl))
-    day = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%d")  # noqa: E731
+    day = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).strftime(
+        "%Y-%m-%d"
+    )  # noqa: E731
     print(_fmt(f"{name} [in {day(t[0])}..]", stats(pnl[a], per_year)))
     print(_fmt(f"{name} [OUT {day(t[len(t) // 2])}..]", stats(pnl[b], per_year)))
 
@@ -317,38 +352,117 @@ def cmd_trend(args: argparse.Namespace) -> None:
     p = daily_panel()
     close, t = p["close"], p["t"]
     cost = args.cost_bps
-    print(f"H1 trend + vol target · {len(t)} days · {len(p['symbols'])} coins · cost {cost} bps/turnover\n")
+    print(
+        f"H1 trend + vol target · {len(t)} days · {len(p['symbols'])} coins · cost {cost} bps/turnover\n"
+    )
     ew = run_weights(close, equal_weight(close), cost)
     _report("Equal-weight buy&hold", ew["pnl"], t, 365)
     btc = run_weights(close[:, :1], np.ones((len(t), 1)), cost)
     _report("BTC buy&hold", btc["pnl"], t, 365)
     tw = trend_weights(close)
-    for label, w in (("Trend+vol target (daily)", tw), ("Trend+vol target (5% band)", band(tw, 0.05 / len(p["symbols"])))):
+    for label, w in (
+        ("Trend+vol target (daily)", tw),
+        ("Trend+vol target (5% band)", band(tw, 0.05 / len(p["symbols"]))),
+    ):
         r = run_weights(close, w, cost)
         _report(label, r["pnl"], t, 365)
-        print(f"{'':34} avg exposure {np.nansum(w, axis=1).mean():.2f}, turnover/yr {r['turnover'].sum() / (len(t) / 365):.1f}x")
+        print(
+            f"{'':34} avg exposure {np.nansum(w, axis=1).mean():.2f}, turnover/yr {r['turnover'].sum() / (len(t) / 365):.1f}x"
+        )
     # BTC alone, same rules.
     bw = trend_weights(close[:, :1])
     _report("BTC trend+vol target", run_weights(close[:, :1], bw, cost)["pnl"], t, 365)
     # Robustness (reported, not used to pick): other horizons / targets.
     print("\nrobustness (full period Sharpe):")
-    for pairs in (((5, 20), (10, 40), (20, 80)), TREND_PAIRS, ((16, 64), (32, 128), (64, 256))):
+    for pairs in (
+        ((5, 20), (10, 40), (20, 80)),
+        TREND_PAIRS,
+        ((16, 64), (32, 128), (64, 256)),
+    ):
         for tv in (0.3, 0.5, 0.8):
             r = run_weights(close, trend_weights(close, tv, pairs), cost)
-            print(f"  pairs {pairs} target {tv:.1f}: Sharpe {stats(r['pnl'], 365)['sharpe']:+.2f}, maxDD {stats(r['pnl'], 365)['max_dd']:+.1f}%")
+            print(
+                f"  pairs {pairs} target {tv:.1f}: Sharpe {stats(r['pnl'], 365)['sharpe']:+.2f}, maxDD {stats(r['pnl'], 365)['max_dd']:+.1f}%"
+            )
+
+
+def hourly_panel(symbols: list[str] = UNIVERSE, agg: int = 1) -> dict:
+    data = {s: fetch_klines(s, "1h", "2022-01-01") for s in symbols}
+    t0 = max(d["t"][0] for d in data.values())
+    t1 = min(d["t"][-1] for d in data.values())
+    grid = np.arange(t0, t1 + 1, 3_600_000)[::agg]
+    close = np.full((len(grid), len(symbols)), np.nan)
+    for j, s in enumerate(symbols):
+        d = data[s]
+        pos = np.searchsorted(d["t"], grid)
+        pos = np.clip(pos, 0, len(d["t"]) - 1)
+        hit = d["t"][pos] == grid
+        close[hit, j] = d["close"][pos[hit]]
+    # Forward-fill rare gaps.
+    for j in range(close.shape[1]):
+        for k in range(1, len(close)):
+            if np.isnan(close[k, j]):
+                close[k, j] = close[k - 1, j]
+    return {"t": grid, "close": close}
+
+
+def cmd_trend_tf(args: argparse.Namespace) -> None:
+    """H1 on intraday candles: same EMA pairs counted in candles."""
+    print(
+        f"H1 on intraday candles (EMA pairs in candles) · cost {args.cost_bps} bps/turnover\n"
+    )
+    for label, agg in (("1h", 1), ("4h", 4)):
+        p = hourly_panel(agg=agg)
+        close, t = p["close"], p["t"]
+        per_year = 365 * 24 / agg
+        global VOL_LOOKBACK
+        saved, VOL_LOOKBACK = VOL_LOOKBACK, 30 * 24 // agg
+        try:
+            vol = realized_vol(close, VOL_LOOKBACK, per_year)
+            sig = np.clip(trend_signal(close), 0, 1)
+            scale = np.clip(TARGET_VOL / np.where(vol > 0, vol, np.nan), 0, 1)
+            w = np.nan_to_num(sig * scale) / close.shape[1]
+        finally:
+            VOL_LOOKBACK = saved
+        _report(
+            f"EW buy&hold {label}",
+            run_weights(close, equal_weight(close), args.cost_bps)["pnl"],
+            t,
+            per_year,
+        )
+        r = run_weights(close, w, args.cost_bps)
+        _report(f"Trend+vol {label}", r["pnl"], t, per_year)
+        rb = run_weights(close, band(w, 0.05 / close.shape[1]), args.cost_bps)
+        _report(f"Trend+vol {label} (band)", rb["pnl"], t, per_year)
+        print(
+            f"{'':34} turnover/yr {r['turnover'].sum() / (len(t) / per_year):.1f}x (banded {rb['turnover'].sum() / (len(t) / per_year):.1f}x)\n"
+        )
 
 
 def cmd_xsmom(args: argparse.Namespace) -> None:
     p = daily_panel()
     close, t = p["close"], p["t"]
     cost = args.cost_bps
-    print(f"H2 cross-sectional momentum · weekly rebalance · cost {cost} bps/turnover\n")
-    _report("Equal-weight buy&hold", run_weights(close, equal_weight(close), cost)["pnl"], t, 365)
+    print(
+        f"H2 cross-sectional momentum · weekly rebalance · cost {cost} bps/turnover\n"
+    )
+    _report(
+        "Equal-weight buy&hold",
+        run_weights(close, equal_weight(close), cost)["pnl"],
+        t,
+        365,
+    )
     trend = trend_signal(close)
     for label, w in (
         ("Top-4 by 3w return", xs_momentum_weights(close)),
-        ("Top-4 by 3w return + trend filter", xs_momentum_weights(close, trend_filter=trend)),
-        ("Long-short top/bottom 4 (research)", xs_momentum_weights(close, long_short=True)),
+        (
+            "Top-4 by 3w return + trend filter",
+            xs_momentum_weights(close, trend_filter=trend),
+        ),
+        (
+            "Long-short top/bottom 4 (research)",
+            xs_momentum_weights(close, long_short=True),
+        ),
         ("Trend+vol target (H1, reference)", trend_weights(close)),
     ):
         r = run_weights(close, w, cost)
@@ -361,8 +475,10 @@ def cmd_xsmom(args: argparse.Namespace) -> None:
         ics.append(_corr(past, fut))
     ics = np.array(ics)
     a, b = _halves(len(ics))
-    print(f"\nweekly cross-sectional rank IC: first half {np.nanmean(ics[a]):+.3f}, second half {np.nanmean(ics[b]):+.3f} "
-          f"(share of weeks > 0: {np.nanmean(ics[b] > 0):.2f})")
+    print(
+        f"\nweekly cross-sectional rank IC: first half {np.nanmean(ics[a]):+.3f}, second half {np.nanmean(ics[b]):+.3f} "
+        f"(share of weeks > 0: {np.nanmean(ics[b] > 0):.2f})"
+    )
 
 
 def cmd_seasonality(args: argparse.Namespace) -> None:
@@ -375,34 +491,62 @@ def cmd_seasonality(args: argparse.Namespace) -> None:
         hours.append((ts // 3_600_000) % 24)
         wdays.append(((ts // DAY_MS) + 3) % 7)  # 1970-01-01 was a Thursday -> 0=Mon
     # Time split on the timestamp axis (same cut for all coins).
-    t_all = np.concatenate([fetch_klines(s, "1h", "2022-01-01")["t"][1:] for s in UNIVERSE])
+    t_all = np.concatenate(
+        [fetch_klines(s, "1h", "2022-01-01")["t"][1:] for s in UNIVERSE]
+    )
     r_all = np.concatenate(rets)
     h_all = np.concatenate(hours)
     d_all = np.concatenate(wdays)
     cut = np.median(t_all)
     first, second = t_all < cut, t_all >= cut
     print("H3 seasonality (hourly returns, 20 coins, UTC)\n")
-    hm = {k: np.array([r_all[m & (h_all == hh)].mean() * 1e4 for hh in range(24)]) for k, m in (("A", first), ("B", second))}
+    hm = {
+        k: np.array([r_all[m & (h_all == hh)].mean() * 1e4 for hh in range(24)])
+        for k, m in (("A", first), ("B", second))
+    }
     print("hour  first-half bps  second-half bps")
     for hh in range(24):
         print(f"  {hh:02d}   {hm['A'][hh]:+7.2f}        {hm['B'][hh]:+7.2f}")
     print(f"correlation of hourly means between halves: {_corr(hm['A'], hm['B']):+.2f}")
-    dm = {k: np.array([r_all[m & (d_all == d)].mean() * 1e4 * 24 for d in range(7)]) for k, m in (("A", first), ("B", second))}
+    dm = {
+        k: np.array([r_all[m & (d_all == d)].mean() * 1e4 * 24 for d in range(7)])
+        for k, m in (("A", first), ("B", second))
+    }
     names = "Mon Tue Wed Thu Fri Sat Sun".split()
-    print("\nweekday (bps/day): " + " ".join(f"{n} {a:+.0f}/{b:+.0f}" for n, a, b in zip(names, dm["A"], dm["B"])))
-    print(f"correlation of weekday means between halves: {_corr(dm['A'], dm['B']):+.2f}")
+    print(
+        "\nweekday (bps/day): "
+        + " ".join(f"{n} {a:+.0f}/{b:+.0f}" for n, a, b in zip(names, dm["A"], dm["B"]))
+    )
+    print(
+        f"correlation of weekday means between halves: {_corr(dm['A'], dm['B']):+.2f}"
+    )
     # Pre-registered literature window: long 21:00-23:00 UTC only.
-    for label, hrs in (("21-23 UTC window (literature)", {21, 22}), ("hours positive in first half", set(np.where(hm["A"] > 0)[0]))):
+    for label, hrs in (
+        ("21-23 UTC window (literature)", {21, 22}),
+        ("hours positive in first half", set(np.where(hm["A"] > 0)[0])),
+    ):
         m = second & np.isin(h_all, list(hrs))
         gross = r_all[m].mean() * 1e4 * len(hrs)
-        print(f"\n{label}: second-half gross {gross:+.2f} bps/day per coin; one entry+exit/day costs {2 * args.cost_bps:.0f} bps")
+        print(
+            f"\n{label}: second-half gross {gross:+.2f} bps/day per coin; one entry+exit/day costs {2 * args.cost_bps:.0f} bps"
+        )
 
 
 def cmd_leadlag(args: argparse.Namespace) -> None:
-    alts = ["ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT"]
+    alts = [
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT",
+        "DOGEUSDT",
+        "ADAUSDT",
+        "AVAXUSDT",
+        "LINKUSDT",
+    ]
     btc = fetch_klines("BTCUSDT", "1m", "2026-07-01")
     print("H4 BTC -> altcoin lead-lag (1m data from 2026-07-01)\n")
-    print(f"{'bar':>4} {'IC first':>9} {'IC second':>10} {'alt own-lag IC':>15} {'|move| top decile bps':>22}")
+    print(
+        f"{'bar':>4} {'IC first':>9} {'IC second':>10} {'alt own-lag IC':>15} {'|move| top decile bps':>22}"
+    )
     for agg in (1, 5, 15, 60):
         rows = {"A": [], "B": [], "own": []}
         big = []
@@ -421,7 +565,9 @@ def cmd_leadlag(args: argparse.Namespace) -> None:
             cut = np.quantile(np.abs(xb), 0.9)
             sel = np.abs(xb) >= cut
             big.append(np.mean(np.sign(xb[sel]) * yb[sel]) * 1e4)
-        print(f"{agg:>3}m {np.nanmean(rows['A']):+9.3f} {np.nanmean(rows['B']):+10.3f} {np.nanmean(rows['own']):+15.3f} {np.mean(big):+22.2f}")
+        print(
+            f"{agg:>3}m {np.nanmean(rows['A']):+9.3f} {np.nanmean(rows['B']):+10.3f} {np.nanmean(rows['own']):+15.3f} {np.mean(big):+22.2f}"
+        )
     print(f"\n(round-trip cost at taker fees: {2 * args.cost_bps:.0f} bps)")
 
 
@@ -447,9 +593,13 @@ def cmd_funding(args: argparse.Namespace) -> None:
     z = np.full_like(fund, np.nan)
     for i in range(30, len(fund)):
         w = fund[i - 30 : i]
-        z[i] = (fund[i] - np.nanmean(w, axis=0)) / np.where(np.nanstd(w, axis=0) > 0, np.nanstd(w, axis=0), np.nan)
+        z[i] = (fund[i] - np.nanmean(w, axis=0)) / np.where(
+            np.nanstd(w, axis=0) > 0, np.nanstd(w, axis=0), np.nan
+        )
     a, b = _halves(len(t))
-    print(f"{'predictor':<28} {'horizon':>7} {'IC first':>9} {'IC second':>10} {'XS IC second':>13}")
+    print(
+        f"{'predictor':<28} {'horizon':>7} {'IC first':>9} {'IC second':>10} {'XS IC second':>13}"
+    )
     for name, x in (("funding level", fund), ("funding z (30d)", z)):
         for hname, y in (("1d", fut1), ("7d", fut7)):
             ia = _corr(x[a].ravel(), y[a].ravel())
@@ -461,8 +611,15 @@ def cmd_funding(args: argparse.Namespace) -> None:
     tw = trend_weights(close)
     crowded = np.nan_to_num(z) > 2
     tw2 = np.where(crowded, 0.0, tw)
-    _report("H1 trend (reference)", run_weights(close, tw, args.cost_bps)["pnl"], t, 365)
-    _report("H1 trend, flat when funding z>2", run_weights(close, tw2, args.cost_bps)["pnl"], t, 365)
+    _report(
+        "H1 trend (reference)", run_weights(close, tw, args.cost_bps)["pnl"], t, 365
+    )
+    _report(
+        "H1 trend, flat when funding z>2",
+        run_weights(close, tw2, args.cost_bps)["pnl"],
+        t,
+        365,
+    )
 
 
 def cmd_gbm(args: argparse.Namespace) -> None:
@@ -475,8 +632,12 @@ def cmd_gbm(args: argparse.Namespace) -> None:
     frames = M.market_frames(M.SYMBOLS, M.INTERVALS)
     horizon, frac = 12, 0.6
     fac = M.evaluate(frames, horizon, 0.0, frac, "factor")["test"]
-    print("H6 gradient boosting vs factor model (out-of-sample IC, 12-candle horizon)\n")
-    print(f"{'tf':>4} {'factor IC':>10} {'GBM IC':>8} {'GBM+hour IC':>12} {'blend IC':>9}")
+    print(
+        "H6 gradient boosting vs factor model (out-of-sample IC, 12-candle horizon)\n"
+    )
+    print(
+        f"{'tf':>4} {'factor IC':>10} {'GBM IC':>8} {'GBM+hour IC':>12} {'blend IC':>9}"
+    )
     for tf in M.INTERVALS:
         tr, te = [], []
         for (_, i), fr in frames.items():
@@ -492,19 +653,35 @@ def cmd_gbm(args: argparse.Namespace) -> None:
             ok = np.isfinite(y) & (np.isnan(fr["X"]).sum(1) == 0) & (idx >= M.F.WARMUP)
             tr.append((fr_x[ok & (idx < sp - horizon)], y[ok & (idx < sp - horizon)]))
             te.append((fr_x[ok & (idx >= sp)], y[ok & (idx >= sp)]))
-        Xtr = np.vstack([a for a, _ in tr]); ytr = np.concatenate([b for _, b in tr])
-        Xte = np.vstack([a for a, _ in te]); yte = np.concatenate([b for _, b in te])
-        base = dict(max_iter=200, learning_rate=0.05, max_leaf_nodes=15,
-                    min_samples_leaf=200, l2_regularization=1.0, random_state=0)
+        Xtr = np.vstack([a for a, _ in tr])
+        ytr = np.concatenate([b for _, b in tr])
+        Xte = np.vstack([a for a, _ in te])
+        yte = np.concatenate([b for _, b in te])
+        base = dict(
+            max_iter=200,
+            learning_rate=0.05,
+            max_leaf_nodes=15,
+            min_samples_leaf=200,
+            l2_regularization=1.0,
+            random_state=0,
+        )
         g = HistGradientBoostingRegressor(**base).fit(Xtr[:, :-2], ytr)
         gh = HistGradientBoostingRegressor(**base).fit(Xtr, ytr)
         p_g = g.predict(Xte[:, :-2])
         p_gh = gh.predict(Xte)
-        spec = M.evaluate({k: v for k, v in frames.items() if k[1] == tf}, horizon, 0.0, frac, "factor")["specs"].get(tf)
+        spec = M.evaluate(
+            {k: v for k, v in frames.items() if k[1] == tf},
+            horizon,
+            0.0,
+            frac,
+            "factor",
+        )["specs"].get(tf)
         p_f = M.LinearModel(spec).predict(Xte[:, :-2]) if spec else np.zeros(len(yte))
         blend = (p_f / (p_f.std() or 1)) + (p_g / (p_g.std() or 1))
-        print(f"{tf:>4} {fac.get(tf, {}).get('ic', float('nan')):+10.3f} {_corr(p_g, yte):+8.3f} "
-              f"{_corr(p_gh, yte):+12.3f} {_corr(blend, yte):+9.3f}")
+        print(
+            f"{tf:>4} {fac.get(tf, {}).get('ic', float('nan')):+10.3f} {_corr(p_g, yte):+8.3f} "
+            f"{_corr(p_gh, yte):+12.3f} {_corr(blend, yte):+9.3f}"
+        )
 
 
 # --------------------------------------------------------------------------
@@ -516,7 +693,16 @@ def cmd_fetch(_: argparse.Namespace) -> None:
         d = fetch_klines(s, "1d", START)
         h = fetch_klines(s, "1h", "2022-01-01")
         print(f"{s}: {len(d['t'])} days, {len(h['t'])} hours", flush=True)
-    for s in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT"]:
+    for s in [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT",
+        "DOGEUSDT",
+        "ADAUSDT",
+        "AVAXUSDT",
+        "LINKUSDT",
+    ]:
         m1 = fetch_klines(s, "1m", "2026-07-01")
         print(f"{s}: {len(m1['t'])} 1m candles", flush=True)
     for s in UNIVERSE:
@@ -532,13 +718,16 @@ COMMANDS = {
     "leadlag": cmd_leadlag,
     "funding": cmd_funding,
     "gbm": cmd_gbm,
+    "trend_tf": cmd_trend_tf,
 }
 
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="PulseShift alpha lab")
     ap.add_argument("command", choices=sorted(COMMANDS))
-    ap.add_argument("--cost-bps", type=float, default=10.0, help="cost per unit turnover")
+    ap.add_argument(
+        "--cost-bps", type=float, default=10.0, help="cost per unit turnover"
+    )
     args = ap.parse_args(argv)
     COMMANDS[args.command](args)
 

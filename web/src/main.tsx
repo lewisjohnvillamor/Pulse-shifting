@@ -119,6 +119,7 @@ const DEFAULT_LAYOUT: Layout[] = [
   { i: "board", x: 8, y: 19, w: 4, h: 6, minW: 3, minH: 4 },
   { i: "monitor", x: 8, y: 25, w: 4, h: 4, minW: 3, minH: 3 },
   { i: "arena", x: 0, y: 19, w: 8, h: 7, minW: 3, minH: 3 },
+  { i: "trend", x: 0, y: 26, w: 8, h: 8, minW: 4, minH: 4 },
 ];
 
 function loadLayout(): Layout[] {
@@ -185,6 +186,7 @@ function App() {
     }
   });
   const [sig, setSig] = useState<any>(null);
+  const [trendPf, setTrendPf] = useState<any>(null);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -458,6 +460,21 @@ function App() {
       clearInterval(id);
     };
   }, [active, tf]);
+
+  // Validated trend + vol-target portfolio (daily); refresh every 15 min.
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const r = await fetch(`${API}/api/portfolio/trend`);
+        if (r.ok) setTrendPf(await r.json());
+      } catch {
+        /* ignore */
+      }
+    };
+    load();
+    const id = setInterval(load, 900000);
+    return () => clearInterval(id);
+  }, []);
 
   const runBt = async () => {
     let url =
@@ -1060,6 +1077,86 @@ function App() {
                 )
               ) : (
                 <em>Off — enable to log live entry/exit calls.</em>
+              )}
+            </section>
+
+            <section key="trend" className="panel trendPanel">
+              <div className="panelHeader compact">
+                <div>
+                  <span className="kicker">Validated · daily</span>
+                  <h2>Trend portfolio</h2>
+                </div>
+                {trendPf && (
+                  <span className="trendExposure">
+                    Exposure {trendPf.exposure_pct}%
+                  </span>
+                )}
+              </div>
+              {trendPf ? (
+                <>
+                  <p className="trendNote">
+                    Rule: hold coins in an uptrend (EMA 8/32, 16/64, 32/128
+                    days), size each to{" "}
+                    {Math.round(trendPf.rule.target_vol * 100)}% annual
+                    volatility, rebalance daily. Out-of-sample (
+                    {trendPf.validation.period_out_of_sample}): Sharpe{" "}
+                    {trendPf.validation.sharpe} vs{" "}
+                    {trendPf.validation.sharpe_equal_weight} buy&amp;hold, max
+                    drawdown {trendPf.validation.max_dd_pct}% vs{" "}
+                    {trendPf.validation.max_dd_equal_weight_pct}%.
+                  </p>
+                  <table className="trendTable">
+                    <thead>
+                      <tr>
+                        <th>Coin</th>
+                        <th>Trend</th>
+                        <th>Vol/yr</th>
+                        <th>Target weight</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trendPf.holdings.map((h: any) => (
+                        <tr
+                          key={h.symbol}
+                          className={h.action === "HOLD" ? "" : "out"}
+                        >
+                          <td>{h.symbol.replace("USDT", "")}</td>
+                          <td
+                            className={
+                              h.trend > 0 ? "up" : h.trend < 0 ? "down" : ""
+                            }
+                          >
+                            {h.trend > 0 ? "+" : ""}
+                            {h.trend.toFixed(2)}
+                          </td>
+                          <td>{h.vol_pct ?? "—"}%</td>
+                          <td>
+                            <span className="weightBar">
+                              <i
+                                style={{
+                                  width: `${Math.min(h.weight_pct * 20, 100)}%`,
+                                }}
+                              />
+                            </span>
+                            {h.weight_pct.toFixed(2)}%
+                          </td>
+                          <td>{h.action}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="trendNote">
+                    Last {trendPf.window.years} yrs replay: Sharpe{" "}
+                    {trendPf.window.strategy.sharpe} (buy&amp;hold{" "}
+                    {trendPf.window.equal_weight.sharpe}), max DD{" "}
+                    {trendPf.window.strategy.max_dd}% (
+                    {trendPf.window.equal_weight.max_dd}%), turnover{" "}
+                    {trendPf.annualised_turnover}×/yr. Paper only.
+                  </p>
+                </>
+              ) : (
+                <em>Loading daily candles for the trend portfolio…</em>
               )}
             </section>
 

@@ -4,3 +4,7 @@ __pycache__/
 .env
 data/
 .DS_Store
+web/node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
+node_modules/

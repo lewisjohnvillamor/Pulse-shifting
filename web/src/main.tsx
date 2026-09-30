@@ -1,103 +1,715 @@
-import React,{useEffect,useRef,useState} from 'react';
-import {createRoot} from 'react-dom/client';
-import {createChart,CandlestickSeries} from 'lightweight-charts';
-import {Activity,BarChart3,BrainCircuit,FlaskConical,Play,RefreshCw,RotateCcw,WalletCards} from 'lucide-react';
-import './styles.css';
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { createChart, CandlestickSeries } from "lightweight-charts";
+import GridLayout, { Layout, WidthProvider } from "react-grid-layout";
+import {
+  Activity,
+  BarChart3,
+  BrainCircuit,
+  FlaskConical,
+  Pin,
+  Play,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  WalletCards,
+  X,
+} from "lucide-react";
 
-type Candle={open_time:number;open:number;high:number;low:number;close:number;volume:number;close_time:number};
-type MarketData={market:any;decision:any;account:any;candles:Candle[];strategy:string;mode:string;stream_connected?:boolean;stream_last_event_ms?:number};
-const API='http://127.0.0.1:8000';
-const money=(n:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(n||0);
-const pct=(n:number)=>Number(n||0).toFixed(2)+'%';
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
+import "./styles.css";
 
-function App(){
- const [data,setData]=useState<MarketData|null>(null);
- const [error,setError]=useState('');
- const [bt,setBt]=useState<any>(null);
- const [amount,setAmount]=useState(250);
- const chartRef=useRef<HTMLDivElement>(null);
- const chartApiRef=useRef<any>(null);
- const seriesRef=useRef<any>(null);
+const Grid = WidthProvider(GridLayout);
 
- const refresh=async()=>{try{const r=await fetch(API+'/api/market');if(!r.ok)throw new Error(await r.text());setData(await r.json());setError('')}catch(e:any){setError(e.message)}};
- useEffect(()=>{refresh();const ws=new WebSocket('ws://127.0.0.1:8000/ws/market');ws.onmessage=(event)=>{const packet=JSON.parse(event.data);if(packet.type!=='market')return;setData(current=>{if(!current)return current;const next={...current,market:packet.market,decision:packet.decision||current.decision,account:packet.account||current.account,stream_connected:packet.stream_connected};if(packet.candle){const candles=[...current.candles];const i=candles.length-1;if(i>=0&&candles[i].open_time===packet.candle.open_time)candles[i]=packet.candle;else candles.push(packet.candle);next.candles=candles.slice(-120)}return next})};ws.onerror=()=>setError('Live market stream disconnected');ws.onopen=()=>setError('');return()=>ws.close()},[]);
- useEffect(()=>{if(!chartRef.current||!data?.candles?.length||chartApiRef.current)return;const chart=createChart(chartRef.current,{height:430,layout:{background:{color:'#ffffff'},textColor:'#6b7280',fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace'},grid:{vertLines:{color:'#f0f2f5'},horzLines:{color:'#f0f2f5'}},rightPriceScale:{borderColor:'#e5e7eb'},timeScale:{borderColor:'#e5e7eb',timeVisible:true,secondsVisible:false}});const series=chart.addSeries(CandlestickSeries,{upColor:'#168b6a',downColor:'#c44f5e',wickUpColor:'#168b6a',wickDownColor:'#c44f5e',borderVisible:false});series.setData(data.candles.map(c=>({time:(c.open_time/1000) as any,open:c.open,high:c.high,low:c.low,close:c.close})));chart.timeScale().fitContent();chartApiRef.current=chart;seriesRef.current=series;const obs=new ResizeObserver(()=>chart.applyOptions({width:chartRef.current?.clientWidth||900}));obs.observe(chartRef.current);return()=>{obs.disconnect();chart.remove();chartApiRef.current=null;seriesRef.current=null}},[!!data?.candles?.length]);
- useEffect(()=>{const c=data?.candles?.[data.candles.length-1];if(!c||!seriesRef.current)return;seriesRef.current.update({time:(c.open_time/1000) as any,open:c.open,high:c.high,low:c.low,close:c.close})},[data?.candles?.[data.candles.length-1]?.close,data?.candles?.[data.candles.length-1]?.high,data?.candles?.[data.candles.length-1]?.low]);
+type Candle = {
+  open_time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  close_time: number;
+};
+type MarketData = {
+  market: any;
+  decision: any;
+  account: any;
+  candles: Candle[];
+  strategy: string;
+  mode: string;
+  stream_connected?: boolean;
+  stream_last_event_ms?: number;
+};
+type PinEntry = { symbol: string; market: any; stream_connected: boolean };
+type SymbolResult = {
+  symbol: string;
+  base: string;
+  quote: string;
+  pinned: boolean;
+};
 
- const order=async(side:string)=>{const r=await fetch(API+'/api/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({side,amount_usd:amount})});if(!r.ok){setError((await r.json()).detail||'Order failed');return}setError('');refresh()};
- const runBt=async()=>{const r=await fetch(API+'/api/backtest?interval=5m&limit=500');setBt(await r.json())};
+const API = "http://127.0.0.1:8000";
+const money = (n: number) =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(n || 0);
+const pct = (n: number) => Number(n || 0).toFixed(2) + "%";
+const baseOf = (symbol: string) => symbol.replace(/USDT$/, "");
 
- if(!data)return <div className="loading"><span>PulseShift</span><small>Connecting to the local quant engine…</small>{error&&<em>{error}</em>}</div>;
- const d=data.decision,a=data.account,m=data.market;
- return <div className="appShell">
-   <header className="topbar">
-    <div className="brand"><div className="brandMark">P</div><div><strong>PulseShift</strong><span>Local quant research</span></div></div>
-    <nav><button className="active">Terminal</button><button disabled>Replay</button><button disabled>Research</button></nav>
-    <div className="marketStatus"><span className="statusDot"/> Paper only <span>·</span> {data.stream_connected===false?"Reconnecting":"Live Binance stream"}</div>
-   </header>
+const DEFAULT_LAYOUT: Layout[] = [
+  { i: "overview", x: 0, y: 0, w: 12, h: 2, minH: 2 },
+  { i: "chart", x: 0, y: 2, w: 8, h: 11, minW: 4, minH: 6 },
+  { i: "strategy", x: 8, y: 2, w: 4, h: 6, minW: 3, minH: 4 },
+  { i: "portfolio", x: 8, y: 8, w: 4, h: 3, minW: 3, minH: 3 },
+  { i: "execution", x: 8, y: 11, w: 4, h: 4, minW: 3, minH: 4 },
+  { i: "ledger", x: 0, y: 13, w: 8, h: 6, minW: 4, minH: 4 },
+  { i: "arena", x: 8, y: 15, w: 4, h: 4, minW: 3, minH: 3 },
+];
 
-   <main className="workspace">
-    <section className="overview panel">
-      <div className="assetBlock"><span>BTC / USDT</span><strong>{money(m.price)}</strong><small className={m.change_24h_pct>=0?'up':'down'}>{m.change_24h_pct>=0?'+':''}{pct(m.change_24h_pct)} today</small></div>
-      <Stat label="Bid" value={money(m.bid)}/>
-      <Stat label="Ask" value={money(m.ask)}/>
-      <Stat label="Spread" value={m.spread_bps.toFixed(2)+' bps'}/>
-      <Stat label="24h quote volume" value={money(m.volume_24h)}/>
-      <button className="iconButton" onClick={refresh} title="Refresh"><RefreshCw size={16}/></button>
-    </section>
-
-    <section className="mainGrid">
-      <article className="chartPanel panel">
-        <div className="panelHeader"><div><span className="kicker">Market</span><h2>BTC/USDT</h2></div><div className="intervals"><button className="active">1m</button><button disabled>5m</button><button disabled>15m</button><button disabled>1h</button></div></div>
-        <div ref={chartRef} className="chart"/>
-        <div className="chartFooter"><span>120 candles</span><span>Refreshes every 5 seconds</span></div>
-      </article>
-
-      <aside className="sideColumn">
-        <section className="panel intelligence">
-          <div className="panelHeader compact"><div><span className="kicker">Model</span><h2>Strategy intelligence</h2></div><BrainCircuit size={18}/></div>
-          <div className="decision"><div><span>Current action</span><strong className={d.action==='LONG'?'up':d.action==='SHORT'?'down':''}>{d.action}</strong></div><small>{data.strategy}</small></div>
-          <Gauge label="Signal confidence" value={d.confidence}/>
-          <Gauge label="Regime fit" value={d.regime_confidence}/>
-          <Gauge label="Execution quality" value={d.execution_confidence}/>
-          <div className="regimeRow"><span>Market regime</span><strong>{d.regime}</strong></div>
-          <ul className="reasons">{d.reasons.map((r:string)=><li key={r}>{r}</li>)}</ul>
-        </section>
-
-        <section className="panel portfolio">
-          <div className="panelHeader compact"><div><span className="kicker">Paper account</span><h2>Portfolio</h2></div><WalletCards size={18}/></div>
-          <div className="equityRow"><strong>{money(a.equity)}</strong><span className={a.total_return_pct>=0?'up':'down'}>{pct(a.total_return_pct)}</span></div>
-          <div className="twoCol"><Stat label="Cash" value={money(a.cash)}/><Stat label="BTC position" value={Number(a.btc_qty).toFixed(6)}/><Stat label="Entry" value={a.entry_price?money(a.entry_price):'—'}/><Stat label="Unrealized P&L" value={money(a.unrealized_pnl)}/></div>
-        </section>
-
-        <section className="panel execution">
-          <div className="panelHeader compact"><div><span className="kicker">Simulator</span><h2>Paper execution</h2></div><BarChart3 size={18}/></div>
-          <label>Notional (USDT)</label><input type="number" value={amount} min={10} step={10} onChange={e=>setAmount(Number(e.target.value))}/>
-          <div className="tradeButtons"><button className="tradeButton buy" onClick={()=>order('BUY')}><span>Buy BTC</span><small>Simulated ask fill</small></button><button className="tradeButton sell" onClick={()=>order('SELL')}><span>Sell BTC</span><small>Simulated bid fill</small></button></div>
-          <button className="secondary actionButton" onClick={()=>order('CLOSE')}>Close full position</button>
-          <button className="linkButton" onClick={async()=>{await fetch(API+'/api/reset',{method:'POST'});refresh()}}><RotateCcw size={14}/> Reset paper account</button>
-          {error&&<div className="inlineError">{error}</div>}
-        </section>
-      </aside>
-    </section>
-
-    <section className="bottomGrid">
-      <section className="panel ledger">
-        <div className="panelHeader"><div><span className="kicker">Activity</span><h2>Execution ledger</h2></div><Activity size={18}/></div>
-        <div className="tableWrap"><table><thead><tr><th>Time</th><th>Side</th><th>Qty BTC</th><th>Price</th><th>Fee</th><th>P&L</th></tr></thead><tbody>{a.trades.length?a.trades.map((t:any)=><tr key={t.ts}><td>{new Date(t.ts).toLocaleTimeString()}</td><td className={t.side==='BUY'?'up':'down'}>{t.side}</td><td>{Number(t.qty).toFixed(6)}</td><td>{money(t.price)}</td><td>{money(t.fee)}</td><td>{money(t.pnl)}</td></tr>):<tr><td colSpan={6} className="empty">No paper executions yet. Use the simulator to create the first trade.</td></tr>}</tbody></table></div>
-      </section>
-
-      <section className="panel arena">
-        <div className="panelHeader"><div><span className="kicker">Research</span><h2>Strategy arena</h2></div><button className="runButton" onClick={runBt}><Play size={14}/> Run baseline</button></div>
-        <p>Run the EMA Momentum baseline across the latest 500 five-minute candles.</p>
-        {bt?<div className="arenaStats"><Stat label="Return" value={pct(bt.return_pct)}/><Stat label="Round trips" value={String(bt.round_trips)}/><Stat label="Win rate" value={pct(bt.win_rate_pct)}/><Stat label="Max drawdown" value={pct(bt.max_drawdown_pct)}/><Stat label="Profit factor" value={bt.profit_factor??'—'}/></div>:<div className="arenaEmpty"><FlaskConical size={20}/><span>No experiment results yet</span></div>}
-      </section>
-    </section>
-   </main>
- </div>
+function loadLayout(): Layout[] {
+  try {
+    const raw = localStorage.getItem("pulseshift-layout");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    }
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_LAYOUT;
 }
 
-function Stat({label,value}:{label:string,value:string}){return <div className="stat"><span>{label}</span><strong>{value}</strong></div>}
-function Gauge({label,value}:{label:string,value:number}){return <div className="gauge"><div><span>{label}</span><strong>{Math.round(value*100)}%</strong></div><div className="track"><i style={{width:Math.max(0,Math.min(100,value*100))+'%'}}/></div></div>}
+function App() {
+  const [pins, setPins] = useState<PinEntry[]>([]);
+  const [active, setActive] = useState<string>(
+    () => localStorage.getItem("pulseshift-active") || "",
+  );
+  const [data, setData] = useState<MarketData | null>(null);
+  const [error, setError] = useState("");
+  const [bt, setBt] = useState<any>(null);
+  const [amount, setAmount] = useState(250);
+  const [layout, setLayout] = useState<Layout[]>(loadLayout);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SymbolResult[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);
+  const refreshPins = useCallback(async () => {
+    try {
+      const r = await fetch(API + "/api/watchlist");
+      if (r.ok) setPins((await r.json()).symbols);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const activeRef = useRef(active);
+  activeRef.current = active;
+
+  const refresh = useCallback(async (symbol: string) => {
+    if (!symbol) return;
+    try {
+      const r = await fetch(API + "/api/market?symbol=" + symbol);
+      if (!r.ok) throw new Error(await r.text());
+      const payload = await r.json();
+      if (activeRef.current !== symbol) return;
+      setData(payload);
+      setError("");
+    } catch (e: any) {
+      if (activeRef.current === symbol) setError(e.message);
+    }
+  }, []);
+
+  // Bootstrap watchlist, then pick an active symbol.
+  useEffect(() => {
+    refreshPins();
+  }, [refreshPins]);
+  useEffect(() => {
+    if (!pins.length) return;
+    if (!active || !pins.some((p) => p.symbol === active)) {
+      setActive(pins[0].symbol);
+    }
+  }, [pins, active]);
+  useEffect(() => {
+    if (active) localStorage.setItem("pulseshift-active", active);
+  }, [active]);
+
+  // Poll pin strip prices.
+  useEffect(() => {
+    const id = setInterval(refreshPins, 4000);
+    return () => clearInterval(id);
+  }, [refreshPins]);
+
+  // Load + stream the active symbol.
+  useEffect(() => {
+    if (!active) return;
+    setData(null);
+    setBt(null);
+    refresh(active);
+    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/market?symbol=${active}`);
+    ws.onmessage = (event) => {
+      const packet = JSON.parse(event.data);
+      if (packet.type !== "market") return;
+      setData((current) => {
+        if (!current) return current;
+        const next = {
+          ...current,
+          market: packet.market,
+          decision: packet.decision || current.decision,
+          account: packet.account || current.account,
+          stream_connected: packet.stream_connected,
+        };
+        if (packet.candle) {
+          const candles = [...current.candles];
+          const i = candles.length - 1;
+          if (i >= 0 && candles[i].open_time === packet.candle.open_time)
+            candles[i] = packet.candle;
+          else candles.push(packet.candle);
+          next.candles = candles.slice(-120);
+        }
+        return next;
+      });
+    };
+    ws.onerror = () => setError("Live market stream disconnected");
+    ws.onopen = () => setError("");
+    return () => ws.close();
+  }, [active, refresh]);
+
+  // Symbol search.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const id = setTimeout(async () => {
+      try {
+        const r = await fetch(
+          API + "/api/symbols?query=" + encodeURIComponent(query),
+        );
+        if (r.ok) setResults((await r.json()).symbols);
+      } catch {
+        /* ignore */
+      }
+    }, 200);
+    return () => clearTimeout(id);
+  }, [query, pickerOpen]);
+
+  const pin = async (symbol: string) => {
+    const r = await fetch(API + "/api/watchlist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol }),
+    });
+    if (!r.ok) {
+      setError((await r.json()).detail || `Could not pin ${symbol}`);
+      return;
+    }
+    setQuery("");
+    setPickerOpen(false);
+    refreshPins();
+    setActive(symbol);
+  };
+  const unpin = async (symbol: string) => {
+    await fetch(API + "/api/watchlist/" + symbol, { method: "DELETE" });
+    refreshPins();
+  };
+
+  const order = async (side: string) => {
+    const r = await fetch(API + "/api/order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ side, amount_usd: amount, symbol: active }),
+    });
+    if (!r.ok) {
+      setError((await r.json()).detail || "Order failed");
+      return;
+    }
+    setError("");
+    refresh(active);
+  };
+  const runBt = async () => {
+    const r = await fetch(
+      API + `/api/backtest?symbol=${active}&interval=5m&limit=500`,
+    );
+    setBt(await r.json());
+  };
+
+  return (
+    <div className="appShell">
+      <header className="topbar">
+        <div className="brand">
+          <div className="brandMark">P</div>
+          <div>
+            <strong>PulseShift</strong>
+            <span>Local quant research</span>
+          </div>
+        </div>
+        <nav className="symbolTabs">
+          {pins.map((p) => (
+            <button
+              key={p.symbol}
+              className={p.symbol === active ? "active" : ""}
+              onClick={() => setActive(p.symbol)}
+              title={p.symbol}
+            >
+              {baseOf(p.symbol)}
+              <span className="tabPrice">
+                {p.market ? money(p.market.price) : "—"}
+              </span>
+              <span
+                className="tabClose"
+                title={`Unpin ${p.symbol}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  unpin(p.symbol);
+                }}
+              >
+                <X size={11} />
+              </span>
+            </button>
+          ))}
+          <button
+            className="addTab"
+            onClick={() => setPickerOpen((v) => !v)}
+            title="Pin a symbol"
+          >
+            <Plus size={14} />
+          </button>
+        </nav>
+        <div className="marketStatus">
+          <span className="statusDot" /> Paper only <span>·</span>{" "}
+          {data?.stream_connected === false
+            ? "Reconnecting"
+            : "Live Binance stream"}
+        </div>
+      </header>
+
+      {pickerOpen && (
+        <div className="picker panel">
+          <div className="pickerSearch">
+            <Search size={14} />
+            <input
+              autoFocus
+              placeholder="Search Binance spot symbols (e.g. ETH, SOL)…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className="pickerResults">
+            {results.map((s) => (
+              <button key={s.symbol} onClick={() => pin(s.symbol)}>
+                <strong>{s.base}</strong>
+                <span>{s.symbol}</span>
+                {s.pinned ? <Pin size={13} /> : <Plus size={13} />}
+              </button>
+            ))}
+            {!results.length && <em>Searching Binance symbols…</em>}
+          </div>
+        </div>
+      )}
+
+      <main className="workspace">
+        {!data ? (
+          <div className="loading">
+            <span>PulseShift</span>
+            <small>Connecting to the local quant engine…</small>
+            {error && <em>{error}</em>}
+          </div>
+        ) : (
+          <Grid
+            className="layout"
+            layout={layout}
+            cols={12}
+            rowHeight={44}
+            margin={[14, 14]}
+            draggableHandle=".panelHeader"
+            onLayoutChange={(l: Layout[]) => {
+              setLayout(l);
+              localStorage.setItem("pulseshift-layout", JSON.stringify(l));
+            }}
+          >
+            <section key="overview" className="overview panel">
+              <div className="panelHeader dragHint" />
+              <div className="assetBlock">
+                <span>{baseOf(active)} / USDT</span>
+                <strong>{money(data.market.price)}</strong>
+                <small
+                  className={data.market.change_24h_pct >= 0 ? "up" : "down"}
+                >
+                  {data.market.change_24h_pct >= 0 ? "+" : ""}
+                  {pct(data.market.change_24h_pct)} today
+                </small>
+              </div>
+              <Stat label="Bid" value={money(data.market.bid)} />
+              <Stat label="Ask" value={money(data.market.ask)} />
+              <Stat
+                label="Spread"
+                value={data.market.spread_bps.toFixed(2) + " bps"}
+              />
+              <Stat
+                label="24h quote volume"
+                value={money(data.market.volume_24h)}
+              />
+              <button
+                className="iconButton"
+                onClick={() => refresh(active)}
+                title="Refresh"
+              >
+                <RefreshCw size={16} />
+              </button>
+            </section>
+
+            <article key="chart" className="chartPanel panel">
+              <div className="panelHeader">
+                <div>
+                  <span className="kicker">Market</span>
+                  <h2>{active}</h2>
+                </div>
+                <div className="intervals">
+                  <button className="active">1m</button>
+                  <button disabled>5m</button>
+                  <button disabled>15m</button>
+                  <button disabled>1h</button>
+                </div>
+              </div>
+              <Chart key={active} candles={data.candles} />
+              <div className="chartFooter">
+                <span>{data.candles.length} candles</span>
+                <span>Streaming live</span>
+              </div>
+            </article>
+
+            <section key="strategy" className="panel intelligence">
+              <div className="panelHeader compact">
+                <div>
+                  <span className="kicker">Model</span>
+                  <h2>Strategy intelligence</h2>
+                </div>
+                <BrainCircuit size={18} />
+              </div>
+              {data.decision ? (
+                <>
+                  <div className="decision">
+                    <div>
+                      <span>Current action</span>
+                      <strong
+                        className={
+                          data.decision.action === "LONG"
+                            ? "up"
+                            : data.decision.action === "SHORT"
+                              ? "down"
+                              : ""
+                        }
+                      >
+                        {data.decision.action}
+                      </strong>
+                    </div>
+                    <small>{data.strategy}</small>
+                  </div>
+                  <Gauge
+                    label="Signal confidence"
+                    value={data.decision.confidence}
+                  />
+                  <Gauge
+                    label="Regime fit"
+                    value={data.decision.regime_confidence}
+                  />
+                  <Gauge
+                    label="Execution quality"
+                    value={data.decision.execution_confidence}
+                  />
+                  <div className="regimeRow">
+                    <span>Market regime</span>
+                    <strong>{data.decision.regime}</strong>
+                  </div>
+                  <ul className="reasons">
+                    {data.decision.reasons.map((r: string) => (
+                      <li key={r}>{r}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <em>Warming up…</em>
+              )}
+            </section>
+
+            <section key="portfolio" className="panel portfolio">
+              <div className="panelHeader compact">
+                <div>
+                  <span className="kicker">Paper account</span>
+                  <h2>Portfolio</h2>
+                </div>
+                <WalletCards size={18} />
+              </div>
+              <div className="equityRow">
+                <strong>{money(data.account.equity)}</strong>
+                <span
+                  className={data.account.total_return_pct >= 0 ? "up" : "down"}
+                >
+                  {pct(data.account.total_return_pct)}
+                </span>
+              </div>
+              <div className="twoCol">
+                <Stat label="Cash" value={money(data.account.cash)} />
+                <Stat
+                  label={baseOf(active) + " position"}
+                  value={
+                    data.account.position
+                      ? Number(data.account.position.qty).toFixed(6)
+                      : "0"
+                  }
+                />
+                <Stat
+                  label="Entry"
+                  value={
+                    data.account.position?.entry_price
+                      ? money(data.account.position.entry_price)
+                      : "—"
+                  }
+                />
+                <Stat
+                  label="Unrealized P&L"
+                  value={money(data.account.unrealized_pnl)}
+                />
+              </div>
+              {Object.keys(data.account.positions || {}).length > 1 && (
+                <div className="positionChips">
+                  {Object.entries(data.account.positions).map(
+                    ([sym, p]: [string, any]) => (
+                      <span key={sym} className="chip">
+                        {baseOf(sym)} {money(p.market_value)}
+                      </span>
+                    ),
+                  )}
+                </div>
+              )}
+            </section>
+
+            <section key="execution" className="panel execution">
+              <div className="panelHeader compact">
+                <div>
+                  <span className="kicker">Simulator</span>
+                  <h2>Paper execution</h2>
+                </div>
+                <BarChart3 size={18} />
+              </div>
+              <label>Notional (USDT)</label>
+              <input
+                type="number"
+                value={amount}
+                min={10}
+                step={10}
+                onChange={(e) => setAmount(Number(e.target.value))}
+              />
+              <div className="tradeButtons">
+                <button
+                  className="tradeButton buy"
+                  onClick={() => order("BUY")}
+                >
+                  <span>Buy {baseOf(active)}</span>
+                  <small>Simulated ask fill</small>
+                </button>
+                <button
+                  className="tradeButton sell"
+                  onClick={() => order("SELL")}
+                >
+                  <span>Sell {baseOf(active)}</span>
+                  <small>Simulated bid fill</small>
+                </button>
+              </div>
+              <button
+                className="secondary actionButton"
+                onClick={() => order("CLOSE")}
+              >
+                Close full position
+              </button>
+              <button
+                className="linkButton"
+                onClick={async () => {
+                  await fetch(API + "/api/reset", { method: "POST" });
+                  refresh(active);
+                }}
+              >
+                <RotateCcw size={14} /> Reset paper account
+              </button>
+              {error && <div className="inlineError">{error}</div>}
+            </section>
+
+            <section key="ledger" className="panel ledger">
+              <div className="panelHeader">
+                <div>
+                  <span className="kicker">Activity</span>
+                  <h2>Execution ledger</h2>
+                </div>
+                <Activity size={18} />
+              </div>
+              <div className="tableWrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Symbol</th>
+                      <th>Side</th>
+                      <th>Qty</th>
+                      <th>Price</th>
+                      <th>Fee</th>
+                      <th>P&L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.account.trades.length ? (
+                      data.account.trades.map((t: any) => (
+                        <tr key={t.ts + t.symbol}>
+                          <td>{new Date(t.ts).toLocaleTimeString()}</td>
+                          <td>{baseOf(t.symbol)}</td>
+                          <td className={t.side === "BUY" ? "up" : "down"}>
+                            {t.side}
+                          </td>
+                          <td>{Number(t.qty).toFixed(6)}</td>
+                          <td>{money(t.price)}</td>
+                          <td>{money(t.fee)}</td>
+                          <td>{money(t.pnl)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={7} className="empty">
+                          No paper executions yet. Use the simulator to create
+                          the first trade.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section key="arena" className="panel arena">
+              <div className="panelHeader">
+                <div>
+                  <span className="kicker">Research</span>
+                  <h2>Strategy arena</h2>
+                </div>
+                <button className="runButton" onClick={runBt}>
+                  <Play size={14} /> Run baseline
+                </button>
+              </div>
+              <p>
+                Run the EMA Momentum baseline on {active} across the latest 500
+                five-minute candles.
+              </p>
+              {bt ? (
+                <div className="arenaStats">
+                  <Stat label="Return" value={pct(bt.return_pct)} />
+                  <Stat label="Round trips" value={String(bt.round_trips)} />
+                  <Stat label="Win rate" value={pct(bt.win_rate_pct)} />
+                  <Stat label="Max drawdown" value={pct(bt.max_drawdown_pct)} />
+                  <Stat label="Profit factor" value={bt.profit_factor ?? "—"} />
+                </div>
+              ) : (
+                <div className="arenaEmpty">
+                  <FlaskConical size={20} />
+                  <span>No experiment results yet</span>
+                </div>
+              )}
+            </section>
+          </Grid>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function Chart({ candles }: { candles: Candle[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<any>(null);
+  const seriesRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!ref.current || !candles.length) return;
+    const chart = createChart(ref.current, {
+      layout: {
+        background: { color: "#ffffff" },
+        textColor: "#6b7280",
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      },
+      grid: {
+        vertLines: { color: "#f0f2f5" },
+        horzLines: { color: "#f0f2f5" },
+      },
+      rightPriceScale: { borderColor: "#e5e7eb" },
+      timeScale: {
+        borderColor: "#e5e7eb",
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      autoSize: true,
+    });
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: "#168b6a",
+      downColor: "#c44f5e",
+      wickUpColor: "#168b6a",
+      wickDownColor: "#c44f5e",
+      borderVisible: false,
+    });
+    series.setData(
+      candles.map((c) => ({
+        time: (c.open_time / 1000) as any,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      })),
+    );
+    chart.timeScale().fitContent();
+    chartRef.current = chart;
+    seriesRef.current = series;
+    return () => {
+      chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+    };
+  }, [candles.length > 0]);
+
+  useEffect(() => {
+    const c = candles[candles.length - 1];
+    if (!c || !seriesRef.current) return;
+    seriesRef.current.update({
+      time: (c.open_time / 1000) as any,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    });
+  }, [candles]);
+
+  return <div ref={ref} className="chart" />;
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+function Gauge({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="gauge">
+      <div>
+        <span>{label}</span>
+        <strong>{Math.round(value * 100)}%</strong>
+      </div>
+      <div className="track">
+        <i style={{ width: Math.max(0, Math.min(100, value * 100)) + "%" }} />
+      </div>
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 @dataclass
 class Trade:
+    symbol: str
     side: str
     qty: float
     price: float
@@ -18,72 +19,108 @@ class Trade:
 
 
 @dataclass
+class Position:
+    qty: float = 0.0
+    entry_price: float = 0.0
+
+    def as_dict(self, price: float) -> dict:
+        market_value = self.qty * price
+        unrealized = (price - self.entry_price) * self.qty if self.qty else 0.0
+        return {
+            "qty": self.qty,
+            "entry_price": round(self.entry_price, 8),
+            "market_value": round(market_value, 2),
+            "unrealized_pnl": round(unrealized, 2),
+        }
+
+
+@dataclass
 class PaperBroker:
     starting_cash: float = 10_000.0
     fee_bps: float = 10.0
     cash: float = 10_000.0
-    qty: float = 0.0
-    entry_price: float = 0.0
     realized_pnl: float = 0.0
+    positions: dict[str, Position] = field(default_factory=dict)
     trades: list[Trade] = field(default_factory=list)
 
     def reset(self) -> None:
         self.cash = self.starting_cash
-        self.qty = 0.0
-        self.entry_price = 0.0
         self.realized_pnl = 0.0
+        self.positions.clear()
         self.trades.clear()
 
-    def buy(self, usd: float, price: float) -> Trade:
+    def position(self, symbol: str) -> Position:
+        return self.positions.setdefault(symbol, Position())
+
+    def buy(self, symbol: str, usd: float, price: float) -> Trade:
         usd = max(0.0, min(float(usd), self.cash))
         fee = usd * self.fee_bps / 10_000
         spend = max(0.0, usd - fee)
         added_qty = spend / price if price > 0 else 0.0
 
-        previous_cost = self.qty * self.entry_price
-        new_qty = self.qty + added_qty
-        self.entry_price = (previous_cost + spend) / new_qty if new_qty else 0.0
-        self.qty = new_qty
+        pos = self.position(symbol)
+        previous_cost = pos.qty * pos.entry_price
+        new_qty = pos.qty + added_qty
+        pos.entry_price = (previous_cost + spend) / new_qty if new_qty else 0.0
+        pos.qty = new_qty
         self.cash -= usd
 
-        trade = Trade("BUY", added_qty, price, fee, 0.0, self._now())
+        trade = Trade(symbol, "BUY", added_qty, price, fee, 0.0, self._now())
         self.trades.append(trade)
         return trade
 
-    def sell(self, qty: float, price: float) -> Trade:
-        qty = max(0.0, min(float(qty), self.qty))
+    def sell(self, symbol: str, qty: float, price: float) -> Trade:
+        pos = self.position(symbol)
+        qty = max(0.0, min(float(qty), pos.qty))
         gross = qty * price
         fee = gross * self.fee_bps / 10_000
-        pnl = (price - self.entry_price) * qty - fee
+        pnl = (price - pos.entry_price) * qty - fee
 
         self.cash += gross - fee
-        self.qty -= qty
+        pos.qty -= qty
         self.realized_pnl += pnl
 
-        if self.qty <= 1e-12:
-            self.qty = 0.0
-            self.entry_price = 0.0
+        if pos.qty <= 1e-12:
+            pos.qty = 0.0
+            pos.entry_price = 0.0
 
-        trade = Trade("SELL", qty, price, fee, pnl, self._now())
+        trade = Trade(symbol, "SELL", qty, price, fee, pnl, self._now())
         self.trades.append(trade)
         return trade
 
-    def snapshot(self, price: float) -> dict:
-        market_value = self.qty * price
-        equity = self.cash + market_value
-        unrealized = (price - self.entry_price) * self.qty if self.qty else 0.0
+    def position_qty(self, symbol: str) -> float:
+        pos = self.positions.get(symbol)
+        return pos.qty if pos else 0.0
+
+    def snapshot(
+        self, prices: dict[str, float], focus_symbol: str | None = None
+    ) -> dict:
+        positions_out: dict[str, dict] = {}
+        market_value_total = 0.0
+        unrealized_total = 0.0
+        for symbol, pos in self.positions.items():
+            if pos.qty <= 0:
+                continue
+            price = prices.get(symbol, pos.entry_price)
+            view = pos.as_dict(price)
+            positions_out[symbol] = view
+            market_value_total += view["market_value"]
+            unrealized_total += view["unrealized_pnl"]
+
+        equity = self.cash + market_value_total
+        focus = positions_out.get(focus_symbol) if focus_symbol else None
 
         return {
             "starting_cash": self.starting_cash,
             "cash": round(self.cash, 2),
-            "btc_qty": self.qty,
-            "entry_price": round(self.entry_price, 2),
-            "market_value": round(market_value, 2),
+            "market_value": round(market_value_total, 2),
             "equity": round(equity, 2),
-            "unrealized_pnl": round(unrealized, 2),
+            "unrealized_pnl": round(unrealized_total, 2),
             "realized_pnl": round(self.realized_pnl, 2),
             "total_return_pct": round((equity / self.starting_cash - 1) * 100, 4),
             "trade_count": len(self.trades),
+            "position": focus,
+            "positions": positions_out,
             "trades": [trade.as_dict() for trade in self.trades[-30:]][::-1],
         }
 

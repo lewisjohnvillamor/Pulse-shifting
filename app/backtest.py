@@ -21,19 +21,23 @@ def run_backtest(candles: list[dict], fee_bps: float = 10.0) -> dict:
             qty = (cash - fee) / price
             entry_price = price
             cash = 0.0
-            trades.append({"side": "BUY", "price": price, "confidence": decision.confidence})
+            trades.append(
+                {"side": "BUY", "price": price, "confidence": decision.confidence}
+            )
 
         elif decision.action in ("SHORT", "FLAT") and qty > 0:
             gross = qty * price
             fee = gross * fee_bps / 10_000
             cash = gross - fee
             pnl = (price - entry_price) * qty - fee
-            trades.append({
-                "side": "SELL",
-                "price": price,
-                "pnl": pnl,
-                "confidence": decision.confidence,
-            })
+            trades.append(
+                {
+                    "side": "SELL",
+                    "price": price,
+                    "pnl": pnl,
+                    "confidence": decision.confidence,
+                }
+            )
             qty = 0.0
             entry_price = 0.0
 
@@ -66,7 +70,9 @@ def run_backtest(candles: list[dict], fee_bps: float = 10.0) -> dict:
         "end_equity": round(cash, 2),
         "return_pct": round((cash / 10_000 - 1) * 100, 3),
         "round_trips": len(closed_trades),
-        "win_rate_pct": round((len(wins) / len(closed_trades) * 100) if closed_trades else 0.0, 2),
+        "win_rate_pct": round(
+            (len(wins) / len(closed_trades) * 100) if closed_trades else 0.0, 2
+        ),
         "max_drawdown_pct": round(max_drawdown, 3),
         "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss else None,
         "trades": trades[-50:],

@@ -4,13 +4,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .backtest import run_backtest
 from .market import BinancePublicClient
+from .live_market import LiveMarketFeed
 from .paper import PaperBroker
 from .strategy import EmaMomentumStrategy
 
@@ -18,15 +19,27 @@ BASE_DIR = Path(__file__).resolve().parent
 market = BinancePublicClient()
 strategy = EmaMomentumStrategy()
 broker = PaperBroker()
+live_feed = LiveMarketFeed(market)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        await live_feed.bootstrap()
+    except Exception:
+        pass
+    task = __import__('asyncio').create_task(live_feed.run())
     yield
+    await live_feed.stop()
+    task.cancel()
+    try:
+        await task
+    except Exception:
+        pass
     await market.close()
 
 
-app = FastAPI(title="PulseShift", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="PulseShift", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -49,14 +62,14 @@ async def index():
 
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "mode": "paper", "version": "0.2.0"}
+    return {"ok": True, "mode": "paper", "version": "0.3.0", "market_stream": live_feed.connected}
 
 
 @app.get("/api/market")
 async def get_market():
     try:
-        snapshot = await market.snapshot()
-        candles = await market.klines(limit=120)
+        snapshot = live_feed.market or await market.snapshot()
+        candles = live_feed.candles or await market.klines(limit=120)
         decision = strategy.decide(candles, snapshot.spread_bps)
         return {
             "market": snapshot.as_dict(),
@@ -65,15 +78,46 @@ async def get_market():
             "candles": candles[-120:],
             "strategy": strategy.name,
             "mode": "PAPER",
+            "stream_connected": live_feed.connected,
+            "stream_last_event_ms": live_feed.last_event_ms,
         }
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Market data unavailable: {exc}") from exc
 
 
+@app.websocket("/ws/market")
+async def market_socket(socket: WebSocket):
+    await socket.accept()
+    try:
+        last_sent = 0
+        while True:
+            await __import__('asyncio').sleep(0.25)
+            snapshot = live_feed.market
+            if snapshot is None:
+                continue
+            if snapshot.ts_ms == last_sent and live_feed.last_event_ms == last_sent:
+                continue
+            candles = live_feed.candles
+            decision = strategy.decide(candles, snapshot.spread_bps) if candles else None
+            payload = {
+                "type": "market",
+                "market": snapshot.as_dict(),
+                "candle": live_feed.current_candle(),
+                "decision": decision.as_dict() if decision else None,
+                "account": broker.snapshot(snapshot.price),
+                "stream_connected": live_feed.connected,
+                "stream_last_event_ms": live_feed.last_event_ms,
+            }
+            await socket.send_json(payload)
+            last_sent = max(snapshot.ts_ms, live_feed.last_event_ms)
+    except WebSocketDisconnect:
+        return
+
+
 @app.post("/api/order")
 async def order(body: OrderIn):
     try:
-        snapshot = await market.snapshot()
+        snapshot = live_feed.market or await market.snapshot()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Market data unavailable: {exc}") from exc
 

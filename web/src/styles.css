@@ -1210,3 +1210,153 @@ td {
   font-size: 11px;
   padding: 6px 10px;
 }
+
+
+/* --- v0.10: evolutionary strategy discovery --- */
+.discoverButton {
+  border: 1px solid #c9d8e7;
+  background: #f7fafc;
+  color: #315b84;
+  border-radius: 8px;
+  padding: 8px 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background-color .18s ease, border-color .18s ease, transform .12s ease;
+}
+.discoverButton:hover:not(:disabled) {
+  background: #edf4fa;
+  border-color: #a9c1d8;
+}
+.discoverButton:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.discoverButton:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+.evolutionPanel {
+  border-top: 1px solid var(--line2);
+  padding: 14px 16px 16px;
+  background: #fbfcfd;
+}
+.evolutionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.evolutionHead h3 {
+  margin: 2px 0 0;
+  font-size: 14px;
+  letter-spacing: -.01em;
+}
+.promoteButton {
+  border: 1px solid #bfdcca;
+  background: #f2faf6;
+  color: #176a50;
+  border-radius: 8px;
+  padding: 8px 11px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.promoteButton:hover {
+  background: #e8f6ef;
+}
+.evolutionSummary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+  background: #fff;
+}
+.evolutionSummary .stat {
+  padding: 11px 12px;
+  border-right: 1px solid var(--line2);
+}
+.evolutionSummary .stat:last-child {
+  border-right: 0;
+}
+.generationStrip {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.generationCell {
+  min-width: 92px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 9px;
+}
+.generationCell span,
+.generationCell small {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+}
+.generationCell strong {
+  display: block;
+  margin: 2px 0;
+  font: 650 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.genomeDetails {
+  margin-top: 12px;
+  border-top: 1px solid var(--line2);
+  padding-top: 10px;
+}
+.genomeDetails summary {
+  cursor: pointer;
+  color: #4b5563;
+  font-size: 11px;
+  font-weight: 650;
+}
+.genomeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin-top: 10px;
+}
+.genomeGrid div {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px dashed var(--line2);
+  padding-bottom: 4px;
+}
+.genomeGrid span {
+  color: var(--muted);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.genomeGrid strong {
+  flex: 0 0 auto;
+  font: 600 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.evolutionNote {
+  margin: 10px 0 0 !important;
+  padding: 0 !important;
+  color: #7a838f !important;
+  font-size: 10px !important;
+}
+.evolutionError {
+  margin: 10px 14px;
+}
+@media (max-width: 900px) {
+  .evolutionSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .genomeGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}

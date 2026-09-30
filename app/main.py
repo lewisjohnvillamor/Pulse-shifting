@@ -86,12 +86,15 @@ async def _snapshot_for(symbol: str) -> MarketSnapshot:
         ) from exc
 
 
-def _price_map() -> dict[str, float]:
-    return {
+def _price_map(extra: dict[str, float] | None = None) -> dict[str, float]:
+    prices = {
         symbol: feed.market.price
         for symbol, feed in hub.feeds.items()
         if feed.market and feed.market.price
     }
+    if extra:
+        prices.update(extra)
+    return prices
 
 
 def _market_payload(feed: SymbolFeed, snapshot: MarketSnapshot) -> dict:
@@ -244,7 +247,7 @@ async def order(body: OrderIn):
 
     return {
         "trade": trade.as_dict(),
-        "account": broker.snapshot(_price_map(), symbol),
+        "account": broker.snapshot(_price_map({symbol: snapshot.price}), symbol),
     }
 
 

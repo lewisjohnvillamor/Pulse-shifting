@@ -106,15 +106,20 @@ function App() {
     }
   }, []);
 
+  const activeRef = useRef(active);
+  activeRef.current = active;
+
   const refresh = useCallback(async (symbol: string) => {
     if (!symbol) return;
     try {
       const r = await fetch(API + "/api/market?symbol=" + symbol);
       if (!r.ok) throw new Error(await r.text());
-      setData(await r.json());
+      const payload = await r.json();
+      if (activeRef.current !== symbol) return;
+      setData(payload);
       setError("");
     } catch (e: any) {
-      setError(e.message);
+      if (activeRef.current === symbol) setError(e.message);
     }
   }, []);
 
@@ -190,12 +195,17 @@ function App() {
   }, [query, pickerOpen]);
 
   const pin = async (symbol: string) => {
-    await fetch(API + "/api/watchlist", {
+    const r = await fetch(API + "/api/watchlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ symbol }),
     });
+    if (!r.ok) {
+      setError((await r.json()).detail || `Could not pin ${symbol}`);
+      return;
+    }
     setQuery("");
+    setPickerOpen(false);
     refreshPins();
     setActive(symbol);
   };
@@ -659,7 +669,7 @@ function Chart({ candles }: { candles: Candle[] }) {
       chartRef.current = null;
       seriesRef.current = null;
     };
-  }, []);
+  }, [candles.length > 0]);
 
   useEffect(() => {
     const c = candles[candles.length - 1];

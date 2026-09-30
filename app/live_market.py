@@ -183,7 +183,10 @@ class MarketHub:
             await feed.bootstrap()
         except Exception:
             pass
-        feed.start()
+        if self.feeds.get(symbol) is feed:
+            feed.start()
+        else:
+            await feed.stop()
         return feed
 
     async def unsubscribe(self, symbol: str) -> None:

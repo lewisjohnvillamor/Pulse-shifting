@@ -20,10 +20,10 @@ class Watchlist:
         try:
             raw = json.loads(self.path.read_text())
             self.symbols = [normalize_symbol(s) for s in raw if isinstance(s, str)]
+            return
         except Exception:
-            self.symbols = []
-        if not self.symbols:
-            self.symbols = list(DEFAULT_SYMBOLS)
+            pass
+        self.symbols = list(DEFAULT_SYMBOLS)
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

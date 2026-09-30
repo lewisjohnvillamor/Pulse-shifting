@@ -2,7 +2,7 @@
 
 Local-first crypto paper-trading and algorithm research lab.
 
-PulseShift now uses a **Python/FastAPI quant engine** with a **React + TypeScript terminal UI**. It runs on your own computer, pulls public BTC/USDT market data from Binance, simulates trades locally, records strategy decisions with confidence, and provides a polished browser interface for research.
+PulseShift now uses a **Python/FastAPI quant engine** with a **React + TypeScript terminal UI**. It runs on your own computer, pulls public spot market data from Binance, simulates trades locally, records strategy decisions with confidence, and provides a polished browser interface for research.
 
 ## Current stack
 
@@ -14,14 +14,14 @@ PulseShift now uses a **Python/FastAPI quant engine** with a **React + TypeScrip
 - **Storage:** in-memory for V0.2; DuckDB/Parquet planned next
 - **AI adapters:** Jev/Laya-ready, not yet connected
 
-## V0.2 features
+## V0.4 features
 
-- Local terminal UI at `http://127.0.0.1:5173`
+- Local terminal UI at `http://127.0.0.1:5173` with symbol tabs and draggable, resizable panels
 - Local API at `http://127.0.0.1:8000`
-- BTC/USDT live public Binance market data
+- Any Binance USDT spot pair with a pinned, multi-symbol watchlist
 - Professional candlestick chart
 - Live bid / ask / spread
-- Paper portfolio and simulated fills
+- Paper portfolio and simulated fills across multiple symbols
 - EMA Momentum v1 baseline
 - Signal, regime, and execution confidence
 - Transparent strategy reasons

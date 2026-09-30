@@ -42,7 +42,9 @@ class EmaMomentumStrategy:
 
     def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
         if len(candles) < 30:
-            return Decision("FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 30 candles"])
+            return Decision(
+                "FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 30 candles"]
+            )
 
         closes = [float(c["close"]) for c in candles]
         volumes = [float(c["volume"]) for c in candles]

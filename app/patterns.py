@@ -77,11 +77,11 @@ def detect_patterns(candles: list[dict], lookback: int = 120) -> dict[str, Any]:
 
     # Support / resistance: clusters of recent swings within 0.4% of each other.
     for kind, pts in (("resistance", highs), ("support", lows)):
-        for i, p in pts[-6:]:
-            if abs(p - price) / price < 0.004:
+        for i, p in pts[-8:]:
+            if abs(p - price) / price < 0.002:
                 continue
-            touches = sum(1 for _, q in pts if abs(q - p) / p < 0.004)
-            if touches >= 2 and all(abs(l["price"] - p) / p > 0.002 for l in levels):
+            touches = sum(1 for _, q in pts if abs(q - p) / p < 0.006)
+            if touches >= 2 and all(abs(l["price"] - p) / p > 0.001 for l in levels):
                 levels.append(
                     {
                         "kind": kind,
@@ -97,12 +97,14 @@ def detect_patterns(candles: list[dict], lookback: int = 120) -> dict[str, Any]:
     # Double top / bottom.
     if len(highs) >= 2:
         (i1, p1), (i2, p2) = highs[-2], highs[-1]
-        valley = min((p for i, p, k in swings if k == "low" and i1 < i < i2), default=None)
+        valley = min(
+            (p for i, p, k in swings if k == "low" and i1 < i < i2), default=None
+        )
         if (
             i2 - i1 >= 5
-            and abs(p1 - p2) / p1 < 0.01
+            and abs(p1 - p2) / p1 < 0.015
             and valley is not None
-            and (p1 - valley) / p1 > 0.004
+            and (p1 - valley) / p1 > 0.002
             and price < p2
         ):
             height = p1 - valley
@@ -121,12 +123,14 @@ def detect_patterns(candles: list[dict], lookback: int = 120) -> dict[str, Any]:
             )
     if len(lows) >= 2:
         (i1, p1), (i2, p2) = lows[-2], lows[-1]
-        peak = max((p for i, p, k in swings if k == "high" and i1 < i < i2), default=None)
+        peak = max(
+            (p for i, p, k in swings if k == "high" and i1 < i < i2), default=None
+        )
         if (
             i2 - i1 >= 5
-            and abs(p1 - p2) / p1 < 0.01
+            and abs(p1 - p2) / p1 < 0.015
             and peak is not None
-            and (peak - p1) / p1 > 0.004
+            and (peak - p1) / p1 > 0.002
             and price > p2
         ):
             height = peak - p1
@@ -150,14 +154,12 @@ def detect_patterns(candles: list[dict], lookback: int = 120) -> dict[str, Any]:
         head = max(p1, p2, p3)
         if (
             p2 == head
-            and abs(p1 - p3) / p2 < 0.15
-            and (p2 - p1) / p2 > 0.003
-            and (p2 - p3) / p2 > 0.003
+            and abs(p1 - p3) / p2 < 0.3
+            and (p2 - p1) / p2 > 0.0015
+            and (p2 - p3) / p2 > 0.0015
         ):
             nl = [
-                p
-                for i, p, k in swings
-                if k == "low" and (i1 < i < i2 or i2 < i < i3)
+                p for i, p, k in swings if k == "low" and (i1 < i < i2 or i2 < i < i3)
             ]
             if nl:
                 neckline = mean(nl)
@@ -184,7 +186,7 @@ def detect_patterns(candles: list[dict], lookback: int = 120) -> dict[str, Any]:
         hs = _slope(recent_highs[0], recent_highs[-1])
         ls = _slope(recent_lows[0], recent_lows[-1])
         scale = atr or price * 0.01
-        flat = scale * 0.2
+        flat = scale * 0.4
         name = bias = None
         if abs(hs) < flat and ls > flat:
             name, bias = "Ascending triangle", "bullish"
@@ -213,12 +215,37 @@ def detect_patterns(candles: list[dict], lookback: int = 120) -> dict[str, Any]:
                 )
             )
 
+    # Range: both sides flat — price oscillating in a rectangle.
+    if (
+        not patterns
+        and len(recent_highs) >= 2
+        and len(recent_lows) >= 2
+        and abs(hs) < flat
+        and abs(ls) < flat
+    ):
+        top = max(p for _, p in recent_highs)
+        bottom = min(p for _, p in recent_lows)
+        if (top - bottom) / price > 0.001:
+            patterns.append(
+                _pattern(
+                    "Range",
+                    "neutral",
+                    candles,
+                    recent_highs[:2] + recent_lows[:2],
+                    entry=top,
+                    stop=bottom,
+                    target=top + (top - bottom),
+                    confidence=0.5,
+                    note="Ranging market — trade range edges or wait for the break.",
+                )
+            )
+
     # Flag: strong impulse followed by a shallow counter-drift channel.
     if len(candles) >= 20:
         closes = [float(c["close"]) for c in candles]
         impulse = closes[-12] - closes[-24]
         drift = closes[-1] - closes[-12]
-        if abs(impulse) > 4 * atr and abs(drift) < abs(impulse) * 0.4:
+        if abs(impulse) > 2.5 * atr and abs(drift) < abs(impulse) * 0.5:
             bull = impulse > 0
             if (bull and drift < 0) or (not bull and drift > 0):
                 flag_high = max(float(c["high"]) for c in candles[-12:])
@@ -240,4 +267,4 @@ def detect_patterns(candles: list[dict], lookback: int = 120) -> dict[str, Any]:
                     )
                 )
 
-    return {"patterns": patterns, "levels": levels}
+    return {"patterns": patterns[:4], "levels": levels[:5]}

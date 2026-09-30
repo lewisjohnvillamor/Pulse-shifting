@@ -13,8 +13,13 @@ def _should_exit(strategy: Strategy, window: list[dict]) -> bool:
 
 
 def run_backtest(
-    candles: list[dict], fee_bps: float = 10.0, strategy: Strategy | None = None
+    candles: list[dict],
+    fee_bps: float = 10.0,
+    strategy: Strategy | None = None,
+    start_index: int = 30,
 ) -> dict:
+    """Long-only replay. Candles before `start_index` are indicator history
+    only — no trades are opened there."""
     if strategy is None:
         strategy = EmaMomentumStrategy()
     cash = 10_000.0
@@ -23,8 +28,10 @@ def run_backtest(
     trades: list[dict] = []
     equity_curve = [cash]
 
-    for index in range(30, len(candles)):
-        window = candles[: index + 1]
+    lookback = getattr(strategy, "max_lookback", None)
+    for index in range(max(start_index, 0), len(candles)):
+        start = max(0, index + 1 - lookback) if lookback else 0
+        window = candles[start : index + 1]
         price = float(candles[index]["close"])
 
         if qty == 0:

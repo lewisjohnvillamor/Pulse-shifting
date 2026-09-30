@@ -144,3 +144,27 @@ POST /api/evolution/promote/{strategy_id}
 ```
 
 The holdout result is evidence for comparison, not proof of future profitability. Re-run promising genomes across different symbols, periods, intervals, and market regimes before treating them as robust.
+
+## Walk-forward research (CLI)
+
+The in-app evolution tunes on a single market. For a sturdier read, score a
+strategy on many symbol/interval pairs at once and only on data it was not
+tuned on:
+
+```bash
+# Score current params on BTC/ETH/SOL/BNB x 5m/15m/1h/4h, 2 unseen blocks
+python -m app.research --strategy ai_regime_fusion
+
+# Re-tune inside each fold, then score the next (unseen) block
+python -m app.research --strategy ai_regime_fusion --tune
+
+# Try overrides, or stop the tuner touching some params
+python -m app.research --set trail_atr=3 regime_ema=100
+python -m app.research --tune --freeze trail_atr regime_ema
+```
+
+Each market is split into `folds + 1` chronological blocks. Fold *k* tunes on
+everything before block *k+1* and reports block *k+1* against buy-and-hold.
+Candles are cached under `data/research/`. Tuned params are printed (and
+saved with `--json`), never written to the live strategy config.
+Params marked `tunable=False` (e.g. fees) are never mutated.

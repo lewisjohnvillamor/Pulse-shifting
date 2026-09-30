@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from .strategy import EmaMomentumStrategy
+from .strategy import EmaMomentumStrategy, Strategy
 
 
-def run_backtest(candles: list[dict], fee_bps: float = 10.0) -> dict:
-    strategy = EmaMomentumStrategy()
+def run_backtest(
+    candles: list[dict], fee_bps: float = 10.0, strategy: Strategy | None = None
+) -> dict:
+    if strategy is None:
+        strategy = EmaMomentumStrategy()
     cash = 10_000.0
     qty = 0.0
     entry_price = 0.0

@@ -805,3 +805,289 @@ td {
   right: 0;
   height: 10px;
 }
+
+/* v0.5: strategy board, edge card, param editor */
+.edgePanel {
+  padding-bottom: 12px;
+}
+.verdict {
+  margin: 4px 14px 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+.verdict.up {
+  background: var(--greenSoft);
+  color: var(--green);
+  border-color: #bfe6d8;
+}
+.verdict.warn {
+  background: #fdf4e7;
+  color: #a06a1b;
+  border-color: #f0dcc0;
+}
+.edgeNote {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  padding: 8px 14px 0;
+}
+.strategyBoard .boardRows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  overflow-y: auto;
+}
+.boardRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  background: var(--soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+.boardRow:hover {
+  border-color: var(--accent);
+}
+.boardRow.active {
+  border-color: var(--accent);
+  background: var(--accentSoft);
+}
+.boardName {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.boardName em {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--accent);
+  background: var(--accentSoft);
+  border-radius: 4px;
+  padding: 1px 5px;
+  text-transform: uppercase;
+}
+.boardAction {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  min-width: 42px;
+  text-align: center;
+}
+.boardAction.up {
+  color: var(--green);
+}
+.boardAction.down {
+  color: var(--red);
+}
+.boardConf {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: right;
+}
+.paramEditor {
+  margin-top: 10px;
+  padding: 10px 14px 0;
+  border-top: 1px solid var(--line2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.paramRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.paramRow input {
+  width: 80px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+.arenaControls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.arenaControls select {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: #fff;
+  max-width: 160px;
+}
+.intelligence {
+  overflow-y: auto;
+}
+
+/* --- v0.6: style filter, signal monitor, backtest range --- */
+.styleChips {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px 4px;
+}
+.styleChips button {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  cursor: pointer;
+}
+.styleChips button.active {
+  background: #0f172a;
+  color: #fff;
+  border-color: #0f172a;
+}
+.monitorToggle {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  cursor: pointer;
+}
+.monitorToggle.on {
+  background: #168b6a;
+  color: #fff;
+  border-color: #168b6a;
+}
+.monitorList {
+  list-style: none;
+  margin: 0;
+  padding: 4px 14px 10px;
+  font-size: 11px;
+}
+.monitorList li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px dashed #f0f2f5;
+}
+.monitorList li strong.up {
+  color: #168b6a;
+}
+.monitorList li strong.down {
+  color: #c44f5e;
+}
+.monitorList li em {
+  color: #6b7280;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.arenaRange {
+  display: flex;
+  gap: 12px;
+  padding: 0 14px;
+}
+.arenaRange label {
+  font-size: 11px;
+  color: #6b7280;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.arenaRange input {
+  font: inherit;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+
+/* --- v0.7: settings gear, chart tools, panel padding --- */
+.panel p,
+.panel em.edgeNote,
+.monitorPanel > em,
+.intelligence > em {
+  padding-left: 14px;
+  padding-right: 14px;
+}
+.panelHeader {
+  padding: 10px 14px 6px;
+}
+.gearButton {
+  margin-left: 8px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 8px;
+  padding: 4px 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+.settings {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  z-index: 30;
+  width: 340px;
+  background: #fff;
+}
+.settingsBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 14px;
+}
+.settingsBody label {
+  font-size: 11px;
+  color: #6b7280;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settingsBody input {
+  font: inherit;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+.providerList {
+  padding: 0 14px 8px;
+  font-size: 11px;
+}
+.providerRow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px dashed #f0f2f5;
+}
+.providerRow span {
+  color: #6b7280;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.providerRow em {
+  margin-left: auto;
+  font-style: normal;
+  color: #168b6a;
+}
+.intervals button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

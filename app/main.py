@@ -13,17 +13,26 @@ from pydantic import BaseModel, Field
 from .backtest import run_backtest
 from .live_market import MarketHub, SymbolFeed
 from .market import BinancePublicClient, MarketSnapshot, normalize_symbol
+from .monitor import SignalMonitor
 from .paper import PaperBroker
-from .strategy import EmaMomentumStrategy
+from .patterns import detect_patterns
+from .config import AppConfig
+from .registry import StrategyRegistry
+from .signals import edge_assessment
 from .watchlist import Watchlist
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR.parent / "data"
 market = BinancePublicClient()
-strategy = EmaMomentumStrategy()
 broker = PaperBroker()
 hub = MarketHub(market)
 watchlist = Watchlist(DATA_DIR / "watchlist.json")
+monitor = SignalMonitor(DATA_DIR / "monitor")
+config = AppConfig(DATA_DIR / "config.json")
+registry = StrategyRegistry(
+    plugin_dir=BASE_DIR.parent / "strategies",
+    params_file=DATA_DIR / "strategy_params.json",
+)
 
 
 @asynccontextmanager
@@ -53,6 +62,20 @@ class OrderIn(BaseModel):
 
 class PinIn(BaseModel):
     symbol: str
+
+
+class ParamsIn(BaseModel):
+    params: dict[str, float]
+
+
+class MonitorIn(BaseModel):
+    enabled: bool
+
+
+class ProviderIn(BaseModel):
+    url: str | None = None
+    api_key: str | None = None
+    timeout_ms: int | None = None
 
 
 def _clean_symbol(symbol: str) -> str:
@@ -99,17 +122,48 @@ def _price_map(extra: dict[str, float] | None = None) -> dict[str, float]:
 
 def _market_payload(feed: SymbolFeed, snapshot: MarketSnapshot) -> dict:
     candles = feed.candles
-    decision = strategy.decide(candles, snapshot.spread_bps) if candles else None
-    return {
+    decisions = registry.decide_all(candles, snapshot.spread_bps) if candles else {}
+    # Primary decision comes from the first registered (baseline) strategy.
+    primary_id = next(iter(registry.strategies), None)
+    decision = decisions.get(primary_id) if primary_id else None
+    primary = registry.get(primary_id) if primary_id else None
+    edge = edge_assessment(
+        candles,
+        snapshot,
+        None if primary is None else _decision_obj(decision),
+        fee_bps=broker.fee_bps,
+    )
+    payload = {
         "market": snapshot.as_dict(),
-        "decision": decision.as_dict() if decision else None,
+        "decision": decision,
+        "decisions": decisions,
+        "edge": edge,
         "account": broker.snapshot(_price_map(), snapshot.symbol),
         "candles": candles[-120:],
-        "strategy": strategy.name,
+        "strategies": [s["id"] for s in registry.describe()],
         "mode": "PAPER",
         "stream_connected": feed.connected,
         "stream_last_event_ms": feed.last_event_ms,
+        "monitoring": monitor.is_enabled(snapshot.symbol),
+        "patterns": detect_patterns(candles),
     }
+    monitor.record(snapshot.symbol, payload)
+    return payload
+
+
+def _decision_obj(d: dict | None):
+    from .strategy import Decision
+
+    if not d or "action" not in d:
+        return None
+    return Decision(
+        action=d["action"],
+        confidence=d["confidence"],
+        regime=d["regime"],
+        regime_confidence=d["regime_confidence"],
+        execution_confidence=d["execution_confidence"],
+        reasons=d["reasons"],
+    )
 
 
 @app.get("/")
@@ -180,6 +234,88 @@ async def unpin_symbol(symbol: str):
     if removed:
         await hub.unsubscribe(symbol)
     return {"symbols": watchlist.symbols}
+
+
+@app.get("/api/strategies")
+async def list_strategies():
+    return {"strategies": registry.describe()}
+
+
+@app.put("/api/strategies/{strategy_id}")
+async def configure_strategy(strategy_id: str, body: ParamsIn):
+    result = registry.configure(strategy_id, body.params)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Unknown strategy: {strategy_id}")
+    return {"id": strategy_id, "params": result}
+
+
+@app.post("/api/strategies/reload")
+async def reload_strategies():
+    registry.reload()
+    return {"strategies": [s["id"] for s in registry.describe()]}
+
+
+@app.get("/api/config")
+async def get_config():
+    return config.as_public_dict()
+
+
+@app.put("/api/config/{provider}")
+async def set_provider(provider: str, body: ProviderIn):
+    name = provider.strip().lower()
+    if not name or len(name) > 40:
+        raise HTTPException(status_code=400, detail="Invalid provider name")
+    merged = config.set_provider(
+        name,
+        {
+            "url": body.url,
+            "api_key": body.api_key,
+            "timeout_ms": body.timeout_ms,
+        },
+    )
+    registry.reload()
+    safe = config.as_public_dict()["providers"].get(name, {})
+    return {"provider": name, "config": safe, "stored_keys": list(merged)}
+
+
+@app.post("/api/monitor/{symbol}")
+async def set_monitor(symbol: str, body: MonitorIn):
+    symbol = _clean_symbol(symbol)
+    if body.enabled:
+        await _feed_for(symbol)
+    monitor.set_enabled(symbol, body.enabled)
+    return {
+        "symbol": symbol,
+        "enabled": monitor.is_enabled(symbol),
+        "monitoring": monitor.symbols(),
+    }
+
+
+@app.get("/api/monitor/{symbol}")
+async def get_monitor(symbol: str, limit: int = Query(default=50, le=200)):
+    symbol = _clean_symbol(symbol)
+    return {
+        "symbol": symbol,
+        "enabled": monitor.is_enabled(symbol),
+        "events": monitor.recent(symbol, limit),
+    }
+
+
+@app.get("/api/patterns")
+async def patterns(symbol: str = "BTCUSDT", lookback: int = Query(default=120, le=500)):
+    symbol = _clean_symbol(symbol)
+    feed = hub.feed(symbol)
+    candles = (
+        feed.candles
+        if feed and feed.candles
+        else await market.klines(symbol, limit=min(lookback, 500))
+    )
+    return {"symbol": symbol, **detect_patterns(candles, lookback)}
+
+
+@app.get("/api/monitor")
+async def monitored_symbols():
+    return {"monitoring": monitor.symbols()}
 
 
 @app.get("/api/market")
@@ -258,13 +394,49 @@ async def reset():
 
 
 @app.get("/api/backtest")
-async def backtest(symbol: str = "BTCUSDT", interval: str = "5m", limit: int = 500):
+async def backtest(
+    symbol: str = "BTCUSDT",
+    interval: str = "5m",
+    limit: int = 500,
+    strategy: str | None = None,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+):
+    """Replay a strategy over historical klines. `start_ms`/`end_ms` are
+    epoch milliseconds — pick any point in the past Binance has data for."""
     symbol = _clean_symbol(symbol)
+    instance = None
+    if strategy:
+        instance = registry.get(strategy)
+        if instance is None:
+            raise HTTPException(status_code=404, detail=f"Unknown strategy: {strategy}")
     try:
-        candles = await market.klines(symbol, interval=interval, limit=limit)
-        result = run_backtest(candles)
+        candles = await market.klines(
+            symbol,
+            interval=interval,
+            limit=limit,
+            start_time=start_ms,
+            end_time=end_ms,
+        )
+        if len(candles) < 60:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only {len(candles)} candles in that window — widen it.",
+            )
+        result = run_backtest(candles, strategy=instance)
         result["symbol"] = symbol
+        result["interval"] = interval
+        result["patterns"] = detect_patterns(candles)
+        result["candles"] = candles[-500:]
+        result["strategy_id"] = strategy or "ema_momentum"
+        result["window"] = {
+            "start_ms": candles[0]["open_time"],
+            "end_ms": candles[-1]["close_time"],
+            "candles": len(candles),
+        }
         return result
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=502, detail=f"Backtest data unavailable: {exc}"

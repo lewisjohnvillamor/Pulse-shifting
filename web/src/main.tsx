@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { createChart, CandlestickSeries } from "lightweight-charts";
+import {
+  createChart,
+  createSeriesMarkers,
+  CandlestickSeries,
+  LineSeries,
+} from "lightweight-charts";
 import GridLayout, { Layout, WidthProvider } from "react-grid-layout";
 import {
   Activity,
@@ -13,6 +18,8 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Settings,
+  PenLine,
   WalletCards,
   X,
 } from "lucide-react";
@@ -35,12 +42,16 @@ type Candle = {
 type MarketData = {
   market: any;
   decision: any;
+  decisions?: Record<string, any>;
+  edge?: any;
   account: any;
   candles: Candle[];
-  strategy: string;
+  strategies?: string[];
   mode: string;
   stream_connected?: boolean;
   stream_last_event_ms?: number;
+  monitoring?: boolean;
+  patterns?: any;
 };
 type PinEntry = { symbol: string; market: any; stream_connected: boolean };
 type SymbolResult = {
@@ -64,10 +75,13 @@ const DEFAULT_LAYOUT: Layout[] = [
   { i: "overview", x: 0, y: 0, w: 12, h: 2, minH: 2 },
   { i: "chart", x: 0, y: 2, w: 8, h: 11, minW: 4, minH: 6 },
   { i: "strategy", x: 8, y: 2, w: 4, h: 6, minW: 3, minH: 4 },
-  { i: "portfolio", x: 8, y: 8, w: 4, h: 3, minW: 3, minH: 3 },
-  { i: "execution", x: 8, y: 11, w: 4, h: 4, minW: 3, minH: 4 },
+  { i: "edge", x: 8, y: 8, w: 4, h: 4, minW: 3, minH: 3 },
+  { i: "portfolio", x: 8, y: 12, w: 4, h: 3, minW: 3, minH: 3 },
+  { i: "execution", x: 8, y: 15, w: 4, h: 4, minW: 3, minH: 4 },
   { i: "ledger", x: 0, y: 13, w: 8, h: 6, minW: 4, minH: 4 },
-  { i: "arena", x: 8, y: 15, w: 4, h: 4, minW: 3, minH: 3 },
+  { i: "board", x: 8, y: 19, w: 4, h: 6, minW: 3, minH: 4 },
+  { i: "monitor", x: 8, y: 25, w: 4, h: 4, minW: 3, minH: 3 },
+  { i: "arena", x: 0, y: 19, w: 8, h: 7, minW: 3, minH: 3 },
 ];
 
 function loadLayout(): Layout[] {
@@ -75,7 +89,16 @@ function loadLayout(): Layout[] {
     const raw = localStorage.getItem("pulseshift-layout");
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) return parsed;
+      if (Array.isArray(parsed) && parsed.length) {
+        const known = new Set(parsed.map((l: Layout) => l.i));
+        const missing = DEFAULT_LAYOUT.filter((l) => !known.has(l.i)).map(
+          (l) => ({
+            ...l,
+            y: Math.max(...parsed.map((p: Layout) => p.y + p.h), 0),
+          }),
+        );
+        return [...parsed, ...missing];
+      }
     }
   } catch {
     /* ignore */
@@ -96,6 +119,80 @@ function App() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SymbolResult[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [strategies, setStrategies] = useState<any[]>([]);
+  const [focusStrategy, setFocusStrategy] = useState("ema_momentum");
+  const [btStrategy, setBtStrategy] = useState("ema_momentum");
+  const [styleFilter, setStyleFilter] = useState("all");
+  const [paramDrafts, setParamDrafts] = useState<Record<string, string>>({});
+  const [monitorEvents, setMonitorEvents] = useState<any[]>([]);
+  const [btInterval, setBtInterval] = useState("5m");
+  const [btStart, setBtStart] = useState("");
+  const [btEnd, setBtEnd] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [providers, setProviders] = useState<any>({});
+  const [providerName, setProviderName] = useState("jev");
+  const [providerUrl, setProviderUrl] = useState("");
+  const [providerKey, setProviderKey] = useState("");
+  const [drawMode, setDrawMode] = useState(false);
+  const [drawVersion, setDrawVersion] = useState(0);
+
+  const loadConfig = useCallback(async () => {
+    try {
+      const r = await fetch(API + "/api/config");
+      if (r.ok) setProviders((await r.json()).providers);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  const saveProvider = async () => {
+    const r = await fetch(`${API}/api/config/${providerName}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: providerUrl || null,
+        api_key: providerKey || null,
+      }),
+    });
+    if (r.ok) {
+      setProviderKey("");
+      loadConfig();
+      fetch(API + "/api/strategies/reload", { method: "POST" });
+    }
+  };
+
+  const refreshStrategies = useCallback(async () => {
+    try {
+      const r = await fetch(API + "/api/strategies");
+      if (r.ok) setStrategies((await r.json()).strategies);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  useEffect(() => {
+    refreshStrategies();
+  }, [refreshStrategies]);
+
+  const configureStrategy = async (
+    id: string,
+    params: Record<string, number>,
+  ) => {
+    const r = await fetch(`${API}/api/strategies/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ params }),
+    });
+    if (r.ok) {
+      const { params: updated } = await r.json();
+      setStrategies((list) =>
+        list.map((s) => (s.id === id ? { ...s, params: updated } : s)),
+      );
+      refresh(active);
+    }
+  };
 
   const refreshPins = useCallback(async () => {
     try {
@@ -159,6 +256,8 @@ function App() {
           ...current,
           market: packet.market,
           decision: packet.decision || current.decision,
+          decisions: packet.decisions || current.decisions,
+          edge: packet.edge || current.edge,
           account: packet.account || current.account,
           stream_connected: packet.stream_connected,
         };
@@ -244,10 +343,46 @@ function App() {
     setError("");
     refresh(active);
   };
+  const toggleMonitor = async () => {
+    const enabled = !(data?.monitoring === true);
+    const r = await fetch(`${API}/api/monitor/${active}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (r.ok) {
+      setData((current) =>
+        current ? { ...current, monitoring: enabled } : current,
+      );
+    }
+  };
+
+  // Poll monitor events while monitoring is on.
+  useEffect(() => {
+    if (!active || data?.monitoring !== true) {
+      setMonitorEvents([]);
+      return;
+    }
+    const load = async () => {
+      try {
+        const r = await fetch(`${API}/api/monitor/${active}?limit=8`);
+        if (r.ok) setMonitorEvents((await r.json()).events.reverse());
+      } catch {
+        /* ignore */
+      }
+    };
+    load();
+    const id = setInterval(load, 15000);
+    return () => clearInterval(id);
+  }, [active, data?.monitoring]);
+
   const runBt = async () => {
-    const r = await fetch(
-      API + `/api/backtest?symbol=${active}&interval=5m&limit=500`,
-    );
+    let url =
+      API +
+      `/api/backtest?symbol=${active}&interval=${btInterval}&limit=500&strategy=${btStrategy}`;
+    if (btStart) url += `&start_ms=${new Date(btStart).getTime()}`;
+    if (btEnd) url += `&end_ms=${new Date(btEnd).getTime()}`;
+    const r = await fetch(url);
     setBt(await r.json());
   };
 
@@ -298,8 +433,76 @@ function App() {
           {data?.stream_connected === false
             ? "Reconnecting"
             : "Live Binance stream"}
+          <button
+            className="gearButton"
+            title="Provider settings"
+            onClick={() => setSettingsOpen((v) => !v)}
+          >
+            <Settings size={15} />
+          </button>
         </div>
       </header>
+
+      {settingsOpen && (
+        <div className="settings panel">
+          <div className="panelHeader compact">
+            <div>
+              <span className="kicker">BYO key</span>
+              <h2>AI providers</h2>
+            </div>
+          </div>
+          <div className="settingsBody">
+            <label>
+              Provider
+              <input
+                value={providerName}
+                onChange={(e) => setProviderName(e.target.value)}
+                placeholder="jev"
+              />
+            </label>
+            <label>
+              Endpoint URL
+              <input
+                value={providerUrl}
+                onChange={(e) => setProviderUrl(e.target.value)}
+                placeholder="https://…/decide or http://127.0.0.1:8790/decide"
+              />
+            </label>
+            <label>
+              API key
+              <input
+                type="password"
+                value={providerKey}
+                onChange={(e) => setProviderKey(e.target.value)}
+                placeholder={
+                  providers[providerName]?.api_key_set
+                    ? "saved (leave blank to keep)"
+                    : "paste key"
+                }
+              />
+            </label>
+            <button className="runButton" onClick={saveProvider}>
+              Save
+            </button>
+          </div>
+          <div className="providerList">
+            {Object.entries(providers).map(([name, p]: [string, any]) => (
+              <div key={name} className="providerRow">
+                <strong>{name}</strong>
+                <span>{p.url || "no endpoint"}</span>
+                <em>{p.api_key_set ? "key saved" : "no key"}</em>
+              </div>
+            ))}
+            {!Object.keys(providers).length && (
+              <em>No providers configured yet.</em>
+            )}
+          </div>
+          <small className="edgeNote">
+            Stored locally in data/config.json (gitignored). Strategies named
+            after a provider (e.g. jev, laya) use it automatically.
+          </small>
+        </div>
+      )}
 
       {pickerOpen && (
         <div className="picker panel">
@@ -383,13 +586,31 @@ function App() {
                   <h2>{active}</h2>
                 </div>
                 <div className="intervals">
-                  <button className="active">1m</button>
-                  <button disabled>5m</button>
-                  <button disabled>15m</button>
-                  <button disabled>1h</button>
+                  <button
+                    className={drawMode ? "active" : ""}
+                    onClick={() => setDrawMode((v) => !v)}
+                    title="Draw a trendline (click two points)"
+                  >
+                    <PenLine size={13} /> Draw
+                  </button>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem(`pulseshift-lines-${active}`);
+                      setDrawVersion((v) => v + 1);
+                    }}
+                  >
+                    Clear
+                  </button>
                 </div>
               </div>
-              <Chart key={active} candles={data.candles} />
+              <Chart
+                key={`${active}-${drawVersion}`}
+                symbol={active}
+                candles={data.candles}
+                overlays={data.patterns}
+                drawMode={drawMode}
+                onDrawn={() => setDrawMode(false)}
+              />
               <div className="chartFooter">
                 <span>{data.candles.length} candles</span>
                 <span>Streaming live</span>
@@ -404,49 +625,241 @@ function App() {
                 </div>
                 <BrainCircuit size={18} />
               </div>
-              {data.decision ? (
-                <>
-                  <div className="decision">
-                    <div>
-                      <span>Current action</span>
-                      <strong
-                        className={
-                          data.decision.action === "LONG"
-                            ? "up"
-                            : data.decision.action === "SHORT"
-                              ? "down"
-                              : ""
-                        }
-                      >
-                        {data.decision.action}
-                      </strong>
+              {(() => {
+                const d = data.decisions?.[focusStrategy] ?? data.decision;
+                const meta = strategies.find((s) => s.id === focusStrategy);
+                if (!d) return <em>Warming up…</em>;
+                return (
+                  <>
+                    <div className="decision">
+                      <div>
+                        <span>Current action</span>
+                        <strong
+                          className={
+                            d.action === "LONG"
+                              ? "up"
+                              : d.action === "SHORT"
+                                ? "down"
+                                : ""
+                          }
+                        >
+                          {d.action}
+                        </strong>
+                      </div>
+                      <small>{meta?.name ?? focusStrategy}</small>
                     </div>
-                    <small>{data.strategy}</small>
+                    <Gauge label="Signal confidence" value={d.confidence} />
+                    <Gauge label="Regime fit" value={d.regime_confidence} />
+                    <Gauge
+                      label="Execution quality"
+                      value={d.execution_confidence}
+                    />
+                    <div className="regimeRow">
+                      <span>Market regime</span>
+                      <strong>{d.regime}</strong>
+                    </div>
+                    <ul className="reasons">
+                      {(d.reasons || []).map((r: string) => (
+                        <li key={r}>{r}</li>
+                      ))}
+                    </ul>
+                    {meta?.params?.length > 0 && (
+                      <div className="paramEditor">
+                        <span className="kicker">Parameters</span>
+                        {meta.params.map((p: any) => {
+                          const key = `${focusStrategy}:${p.name}`;
+                          return (
+                            <label key={p.name} className="paramRow">
+                              <span>{p.label || p.name}</span>
+                              <input
+                                type="number"
+                                step={p.step || 1}
+                                min={p.min}
+                                max={p.max}
+                                value={paramDrafts[key] ?? p.value}
+                                onChange={(e) =>
+                                  setParamDrafts((d) => ({
+                                    ...d,
+                                    [key]: e.target.value,
+                                  }))
+                                }
+                                onBlur={(e) => {
+                                  const v = Number(e.target.value);
+                                  if (!Number.isNaN(v) && v !== p.value)
+                                    configureStrategy(focusStrategy, {
+                                      [p.name]: v,
+                                    });
+                                  setParamDrafts((d) => {
+                                    const next = { ...d };
+                                    delete next[key];
+                                    return next;
+                                  });
+                                }}
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </section>
+
+            <section key="edge" className="panel edgePanel">
+              <div className="panelHeader compact">
+                <div>
+                  <span className="kicker">Live edge</span>
+                  <h2>Entry / exit</h2>
+                </div>
+              </div>
+              {data.edge ? (
+                <>
+                  <div
+                    className={`verdict ${data.edge.verdict.startsWith("ENTER") ? "up" : data.edge.verdict === "NO_TRADE" ? "" : "warn"}`}
+                  >
+                    {data.edge.verdict.replace(/_/g, " ")}
                   </div>
-                  <Gauge
-                    label="Signal confidence"
-                    value={data.decision.confidence}
-                  />
-                  <Gauge
-                    label="Regime fit"
-                    value={data.decision.regime_confidence}
-                  />
-                  <Gauge
-                    label="Execution quality"
-                    value={data.decision.execution_confidence}
-                  />
-                  <div className="regimeRow">
-                    <span>Market regime</span>
-                    <strong>{data.decision.regime}</strong>
+                  <div className="twoCol">
+                    <Stat
+                      label="Win probability"
+                      value={pct(data.edge.win_probability * 100)}
+                    />
+                    <Stat
+                      label="Net edge"
+                      value={`${data.edge.net_edge_pct >= 0 ? "+" : ""}${data.edge.net_edge_pct.toFixed(3)}%`}
+                    />
+                    <Stat
+                      label="Breakeven move"
+                      value={`${data.edge.breakeven_move_pct.toFixed(3)}%`}
+                    />
+                    <Stat
+                      label="Expected move"
+                      value={`${data.edge.expected_move_pct.toFixed(3)}%`}
+                    />
+                    <Stat
+                      label="Entry (bid)"
+                      value={money(data.edge.suggested_entry)}
+                    />
+                    <Stat
+                      label="Target"
+                      value={
+                        data.edge.suggested_target
+                          ? money(data.edge.suggested_target)
+                          : "—"
+                      }
+                    />
+                    <Stat
+                      label="Stop"
+                      value={
+                        data.edge.suggested_stop
+                          ? money(data.edge.suggested_stop)
+                          : "—"
+                      }
+                    />
                   </div>
-                  <ul className="reasons">
-                    {data.decision.reasons.map((r: string) => (
-                      <li key={r}>{r}</li>
-                    ))}
-                  </ul>
+                  <small className="edgeNote">{data.edge.note}</small>
                 </>
               ) : (
                 <em>Warming up…</em>
+              )}
+            </section>
+
+            <section key="board" className="panel strategyBoard">
+              <div className="panelHeader compact">
+                <div>
+                  <span className="kicker">Compare</span>
+                  <h2>Strategy board</h2>
+                </div>
+              </div>
+              <div className="styleChips">
+                {["all", "scalping", "day", "swing"].map((s) => (
+                  <button
+                    key={s}
+                    className={styleFilter === s ? "active" : ""}
+                    onClick={() => setStyleFilter(s)}
+                  >
+                    {s === "all" ? "All" : s === "day" ? "Day trade" : s}
+                  </button>
+                ))}
+              </div>
+              <div className="boardRows">
+                {strategies
+                  .filter(
+                    (s) =>
+                      styleFilter === "all" ||
+                      (s.styles || []).includes(styleFilter),
+                  )
+                  .map((s) => {
+                    const d = data.decisions?.[s.id];
+                    return (
+                      <button
+                        key={s.id}
+                        className={`boardRow ${focusStrategy === s.id ? "active" : ""}`}
+                        onClick={() => setFocusStrategy(s.id)}
+                        title={s.description}
+                      >
+                        <span className="boardName">
+                          {s.name}
+                          {!s.builtin && <em>plugin</em>}
+                        </span>
+                        <span
+                          className={`boardAction ${d?.action === "LONG" ? "up" : d?.action === "SHORT" ? "down" : ""}`}
+                        >
+                          {d?.action ?? "—"}
+                        </span>
+                        <span className="boardConf">
+                          {d ? Math.round(d.confidence * 100) + "%" : "—"}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+            </section>
+
+            <section key="monitor" className="panel monitorPanel">
+              <div className="panelHeader compact">
+                <div>
+                  <span className="kicker">Watch</span>
+                  <h2>Signal monitor</h2>
+                </div>
+                <button
+                  className={`monitorToggle ${data.monitoring ? "on" : ""}`}
+                  onClick={toggleMonitor}
+                >
+                  {data.monitoring ? "Monitoring" : "Start monitoring"}
+                </button>
+              </div>
+              {data.monitoring ? (
+                monitorEvents.length ? (
+                  <ul className="monitorList">
+                    {monitorEvents.map((e, i) => (
+                      <li key={e.ts + i}>
+                        <span>{new Date(e.ts).toLocaleTimeString()}</span>
+                        <strong
+                          className={
+                            e.edge?.verdict?.startsWith("ENTER")
+                              ? "up"
+                              : e.edge?.verdict === "NO_TRADE"
+                                ? "down"
+                                : ""
+                          }
+                        >
+                          {(e.edge?.verdict || "—").replace(/_/g, " ")}
+                        </strong>
+                        <em>
+                          {Object.entries(e.decisions || {})
+                            .map(([sid, a]) => `${sid}:${a}`)
+                            .join(" · ")}
+                        </em>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <em>Recording signals to data/monitor/…</em>
+                )
+              ) : (
+                <em>Off — enable to log live entry/exit calls.</em>
               )}
             </section>
 
@@ -607,22 +1020,81 @@ function App() {
                   <span className="kicker">Research</span>
                   <h2>Strategy arena</h2>
                 </div>
-                <button className="runButton" onClick={runBt}>
-                  <Play size={14} /> Run baseline
-                </button>
+                <div className="arenaControls">
+                  <select
+                    value={btStrategy}
+                    onChange={(e) => setBtStrategy(e.target.value)}
+                  >
+                    {strategies.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={btInterval}
+                    onChange={(e) => setBtInterval(e.target.value)}
+                  >
+                    {["1m", "5m", "15m", "1h", "4h", "1d"].map((i) => (
+                      <option key={i} value={i}>
+                        {i}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="runButton" onClick={runBt}>
+                    <Play size={14} /> Run
+                  </button>
+                </div>
+              </div>
+              <div className="arenaRange">
+                <label>
+                  From
+                  <input
+                    type="datetime-local"
+                    value={btStart}
+                    onChange={(e) => setBtStart(e.target.value)}
+                  />
+                </label>
+                <label>
+                  To
+                  <input
+                    type="datetime-local"
+                    value={btEnd}
+                    onChange={(e) => setBtEnd(e.target.value)}
+                  />
+                </label>
               </div>
               <p>
-                Run the EMA Momentum baseline on {active} across the latest 500
-                five-minute candles.
+                Historical backtest on {active} — pick any past window (leave
+                dates blank for the latest 500 candles).
+                {bt?.window &&
+                  ` Window: ${new Date(bt.window.start_ms).toLocaleDateString()} – ${new Date(bt.window.end_ms).toLocaleDateString()}, ${bt.window.candles} candles.`}
               </p>
               {bt ? (
-                <div className="arenaStats">
-                  <Stat label="Return" value={pct(bt.return_pct)} />
-                  <Stat label="Round trips" value={String(bt.round_trips)} />
-                  <Stat label="Win rate" value={pct(bt.win_rate_pct)} />
-                  <Stat label="Max drawdown" value={pct(bt.max_drawdown_pct)} />
-                  <Stat label="Profit factor" value={bt.profit_factor ?? "—"} />
-                </div>
+                <>
+                  {bt.candles?.length > 0 && (
+                    <Chart
+                      key={`bt-${bt.strategy_id}-${bt.window?.start_ms}`}
+                      symbol={active}
+                      candles={bt.candles}
+                      overlays={bt.patterns}
+                      drawMode={false}
+                    />
+                  )}
+                  <div className="arenaStats">
+                    <Stat label="Return" value={pct(bt.return_pct)} />
+                    <Stat label="Round trips" value={String(bt.round_trips)} />
+                    <Stat label="Win rate" value={pct(bt.win_rate_pct)} />
+                    <Stat
+                      label="Max drawdown"
+                      value={pct(bt.max_drawdown_pct)}
+                    />
+                    <Stat
+                      label="Profit factor"
+                      value={bt.profit_factor ?? "—"}
+                    />
+                  </div>
+                </>
               ) : (
                 <div className="arenaEmpty">
                   <FlaskConical size={20} />
@@ -637,10 +1109,37 @@ function App() {
   );
 }
 
-function Chart({ candles }: { candles: Candle[] }) {
+type TrendLine = { t1: number; p1: number; t2: number; p2: number };
+const _tsOf = (c: Candle) => Math.floor(c.open_time / 1000);
+
+function Chart({
+  symbol,
+  candles,
+  overlays,
+  drawMode,
+  onDrawn,
+}: {
+  symbol: string;
+  candles: Candle[];
+  overlays?: any;
+  drawMode: boolean;
+  onDrawn?: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const seriesRef = useRef<any>(null);
+  const pendingRef = useRef<TrendLine | null>(null);
+  const drawModeRef = useRef(drawMode);
+  drawModeRef.current = drawMode;
+
+  const storageKey = `pulseshift-lines-${symbol}`;
+  const loadLines = (): TrendLine[] => {
+    try {
+      return JSON.parse(localStorage.getItem(storageKey) || "[]");
+    } catch {
+      return [];
+    }
+  };
 
   useEffect(() => {
     if (!ref.current || !candles.length) return;
@@ -678,6 +1177,125 @@ function Chart({ candles }: { candles: Candle[] }) {
         close: c.close,
       })),
     );
+    // Saved manual trendlines.
+    for (const l of loadLines()) {
+      const line = chart.addSeries(LineSeries, {
+        color: "#7c3aed",
+        lineWidth: 2,
+      });
+      line.setData([
+        { time: l.t1 as any, value: l.p1 },
+        { time: l.t2 as any, value: l.p2 },
+      ]);
+    }
+
+    // Pattern overlays: polylines, S/R levels, entry/stop/target markers.
+    const markers: any[] = [];
+    const addOverlayLine = (
+      pts: [number, number][],
+      color: string,
+      style = 0,
+    ) => {
+      if (!pts?.length) return;
+      const line = chart.addSeries(LineSeries, {
+        color,
+        lineWidth: 1,
+        lineStyle: style,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      line.setData(pts.map(([t, p]) => ({ time: t as any, value: p })));
+    };
+    for (const lv of overlays?.levels || []) {
+      addOverlayLine(
+        [
+          [lv.t0, lv.price],
+          [lv.t1, lv.price],
+        ],
+        lv.kind === "support" ? "#168b6a" : "#c44f5e",
+        2,
+      );
+    }
+    for (const pat of overlays?.patterns || []) {
+      const color =
+        pat.bias === "bullish"
+          ? "#168b6a"
+          : pat.bias === "bearish"
+            ? "#c44f5e"
+            : "#64748b";
+      const pts = pat.points || [];
+      for (let i = 0; i + 1 < pts.length; i += 2)
+        addOverlayLine([pts[i], pts[i + 1]], color);
+      const last = candles[candles.length - 1];
+      const t = Math.floor(last.open_time / 1000);
+      markers.push(
+        {
+          time: t as any,
+          position: "aboveBar",
+          color,
+          shape: "circle",
+          text: `${pat.name} ${Math.round(pat.confidence * 100)}%`,
+        },
+        {
+          time: t as any,
+          position: "aboveBar",
+          color: "#2563eb",
+          shape: "arrowUp",
+          text: `ENTRY ${pat.entry}`,
+        },
+        {
+          time: t as any,
+          position: "belowBar",
+          color: "#c44f5e",
+          shape: "arrowDown",
+          text: `STOP ${pat.stop}`,
+        },
+        {
+          time: t as any,
+          position: "aboveBar",
+          color: "#168b6a",
+          shape: "arrowUp",
+          text: `TARGET ${pat.target}`,
+        },
+      );
+      addOverlayLine(
+        [
+          [_tsOf(candles[0]), pat.entry],
+          [_tsOf(last), pat.entry],
+        ],
+        "#2563eb",
+        1,
+      );
+    }
+    if (markers.length) createSeriesMarkers(series, markers);
+
+    // Two-click trendline drawing.
+    chart.subscribeClick((param: any) => {
+      if (!drawModeRef.current || !param.point) return;
+      const time = param.time as number;
+      const price = series.coordinateToPrice(param.point.y);
+      if (time == null || price == null) return;
+      if (!pendingRef.current) {
+        pendingRef.current = { t1: time, p1: price, t2: time, p2: price };
+        return;
+      }
+      const first = pendingRef.current;
+      pendingRef.current = null;
+      const line = { ...first, t2: time, p2: price };
+      const all = [...loadLines(), line];
+      localStorage.setItem(storageKey, JSON.stringify(all));
+      const ls = chart.addSeries(LineSeries, {
+        color: "#7c3aed",
+        lineWidth: 2,
+      });
+      ls.setData([
+        { time: line.t1 as any, value: line.p1 },
+        { time: line.t2 as any, value: line.p2 },
+      ]);
+      onDrawn?.();
+    });
+
     chart.timeScale().fitContent();
     chartRef.current = chart;
     seriesRef.current = series;

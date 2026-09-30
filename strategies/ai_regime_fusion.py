@@ -30,6 +30,20 @@ class AiRegimeFusionStrategy(Strategy):
         ParamSpec("trend_slow", "int", 34, 20, 120, 1, "Slow EMA"),
         ParamSpec("vwap_period", "int", 48, 20, 160, 1, "VWAP window"),
         ParamSpec("breakout_period", "int", 24, 10, 80, 1, "Breakout window"),
+        ParamSpec("trend_regime_threshold", "float", 0.35, 0.15, 0.75, 0.01, "Trend regime threshold"),
+        ParamSpec("high_vol_threshold", "float", 0.006, 0.002, 0.02, 0.001, "High-vol threshold"),
+        ParamSpec("tr_trend", "float", 0.38, 0.02, 0.8, 0.01, "Trending · trend weight"),
+        ParamSpec("tr_momentum", "float", 0.27, 0.02, 0.8, 0.01, "Trending · momentum weight"),
+        ParamSpec("tr_reversion", "float", 0.08, 0.0, 0.6, 0.01, "Trending · reversion weight"),
+        ParamSpec("tr_breakout", "float", 0.27, 0.02, 0.8, 0.01, "Trending · breakout weight"),
+        ParamSpec("rg_trend", "float", 0.12, 0.0, 0.6, 0.01, "Ranging · trend weight"),
+        ParamSpec("rg_momentum", "float", 0.13, 0.0, 0.6, 0.01, "Ranging · momentum weight"),
+        ParamSpec("rg_reversion", "float", 0.55, 0.05, 0.9, 0.01, "Ranging · reversion weight"),
+        ParamSpec("rg_breakout", "float", 0.20, 0.0, 0.7, 0.01, "Ranging · breakout weight"),
+        ParamSpec("hv_trend", "float", 0.22, 0.0, 0.7, 0.01, "High vol · trend weight"),
+        ParamSpec("hv_momentum", "float", 0.23, 0.0, 0.7, 0.01, "High vol · momentum weight"),
+        ParamSpec("hv_reversion", "float", 0.15, 0.0, 0.7, 0.01, "High vol · reversion weight"),
+        ParamSpec("hv_breakout", "float", 0.40, 0.05, 0.9, 0.01, "High vol · breakout weight"),
     ]
 
     @staticmethod
@@ -108,30 +122,25 @@ class AiRegimeFusionStrategy(Strategy):
         )
         trend_strength = abs(trend_score)
 
-        if trend_strength >= 0.35:
+        def regime_weights(prefix: str) -> dict[str, float]:
+            raw = {
+                "trend": self.params[f"{prefix}_trend"],
+                "momentum": self.params[f"{prefix}_momentum"],
+                "reversion": self.params[f"{prefix}_reversion"],
+                "breakout": self.params[f"{prefix}_breakout"],
+            }
+            total = sum(raw.values()) or 1.0
+            return {key: value / total for key, value in raw.items()}
+
+        if trend_strength >= self.params["trend_regime_threshold"]:
             regime = "TRENDING"
-            weights = {
-                "trend": 0.38,
-                "momentum": 0.27,
-                "reversion": 0.08,
-                "breakout": 0.27,
-            }
-        elif realized_vol >= 0.006:
+            weights = regime_weights("tr")
+        elif realized_vol >= self.params["high_vol_threshold"]:
             regime = "HIGH_VOL"
-            weights = {
-                "trend": 0.22,
-                "momentum": 0.23,
-                "reversion": 0.15,
-                "breakout": 0.40,
-            }
+            weights = regime_weights("hv")
         else:
             regime = "RANGING"
-            weights = {
-                "trend": 0.12,
-                "momentum": 0.13,
-                "reversion": 0.55,
-                "breakout": 0.20,
-            }
+            weights = regime_weights("rg")
 
         components = {
             "trend": trend_score,

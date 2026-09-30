@@ -13,6 +13,9 @@ from .strategy import (
     DonchianTrendStrategy,
     EmaMomentumStrategy,
     MeanReversionStrategy,
+    RsiTrendPullbackStrategy,
+    KeltnerBreakoutStrategy,
+    StochasticReversionStrategy,
     Strategy,
     VwapReversionStrategy,
 )
@@ -28,6 +31,9 @@ BUILTINS: dict[str, type[Strategy]] = {
         VwapReversionStrategy,
         DonchianTrendStrategy,
         BbSqueezeStrategy,
+        RsiTrendPullbackStrategy,
+        KeltnerBreakoutStrategy,
+        StochasticReversionStrategy,
     )
 }
 

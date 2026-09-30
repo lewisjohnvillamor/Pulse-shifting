@@ -115,6 +115,7 @@ function App() {
   const [focusStrategy, setFocusStrategy] = useState("ema_momentum");
   const [btStrategy, setBtStrategy] = useState("ema_momentum");
   const [styleFilter, setStyleFilter] = useState("all");
+  const [paramDrafts, setParamDrafts] = useState<Record<string, string>>({});
   const [monitorEvents, setMonitorEvents] = useState<any[]>([]);
   const [btInterval, setBtInterval] = useState("5m");
   const [btStart, setBtStart] = useState("");
@@ -536,23 +537,39 @@ function App() {
                     {meta?.params?.length > 0 && (
                       <div className="paramEditor">
                         <span className="kicker">Parameters</span>
-                        {meta.params.map((p: any) => (
-                          <label key={p.name} className="paramRow">
-                            <span>{p.label || p.name}</span>
-                            <input
-                              type="number"
-                              step={p.step || 1}
-                              min={p.min}
-                              max={p.max}
-                              value={p.value}
-                              onChange={(e) =>
-                                configureStrategy(focusStrategy, {
-                                  [p.name]: Number(e.target.value),
-                                })
-                              }
-                            />
-                          </label>
-                        ))}
+                        {meta.params.map((p: any) => {
+                          const key = `${focusStrategy}:${p.name}`;
+                          return (
+                            <label key={p.name} className="paramRow">
+                              <span>{p.label || p.name}</span>
+                              <input
+                                type="number"
+                                step={p.step || 1}
+                                min={p.min}
+                                max={p.max}
+                                value={paramDrafts[key] ?? p.value}
+                                onChange={(e) =>
+                                  setParamDrafts((d) => ({
+                                    ...d,
+                                    [key]: e.target.value,
+                                  }))
+                                }
+                                onBlur={(e) => {
+                                  const v = Number(e.target.value);
+                                  if (!Number.isNaN(v) && v !== p.value)
+                                    configureStrategy(focusStrategy, {
+                                      [p.name]: v,
+                                    });
+                                  setParamDrafts((d) => {
+                                    const next = { ...d };
+                                    delete next[key];
+                                    return next;
+                                  });
+                                }}
+                              />
+                            </label>
+                          );
+                        })}
                       </div>
                     )}
                   </>

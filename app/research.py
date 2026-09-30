@@ -64,7 +64,7 @@ async def _fetch(symbol: str, interval: str, bars: int) -> list[dict]:
 
 def load_candles(symbol: str, interval: str, bars: int) -> list[dict]:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = CACHE_DIR / f"{symbol}_{interval}_{bars}.json"
+    path = CACHE_DIR / f"{symbol}_{interval}_{bars}_v2.json"
     if path.exists():
         return json.loads(path.read_text())
     candles = asyncio.run(_fetch(symbol, interval, bars))

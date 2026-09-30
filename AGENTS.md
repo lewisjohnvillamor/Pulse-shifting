@@ -59,6 +59,11 @@ cd web && npm run build                # tsc -b && vite build
   for hysteresis/stops. Set `max_lookback` on a strategy to bound the window.
 - `python -m app.research` runs multi-market walk-forward evaluation/tuning;
   judge strategy changes on its out-of-sample output, not one backtest.
+- `ai_regime_fusion` (v3) loads per-timeframe models from
+  `app/models/fusion_model.json` (features in `app/features.py`, training
+  and evaluation in `app/modeling.py`). Retrain with
+  `python -m app.modeling train` and commit the JSON. Decisions may carry
+  `levels` (entry/stop/target) which the chart draws via `GET /api/signals`.
 - `app/signals.py` computes the spread+fee-aware entry/exit edge card
   (`edge` in `/api/market` payloads).
 - `app/monitor.py` (SignalMonitor) logs opt-in per-symbol signal events to

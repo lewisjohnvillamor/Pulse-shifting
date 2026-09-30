@@ -55,6 +55,33 @@ type MarketData = {
   monitoring?: boolean;
   patterns?: any;
 };
+type SignalMarker = {
+  time: number;
+  side: "BUY" | "SELL" | "SETUP_UP" | "SETUP_DOWN";
+  price: number;
+  text: string;
+  open?: boolean;
+};
+type SignalPlan = {
+  side: "LONG" | "SHORT";
+  active: boolean;
+  entry: number;
+  stop: number;
+  target: number;
+  horizon_candles?: number;
+  expected_move_bps?: number;
+  cost_bps?: number;
+  reliability_ic?: number;
+  timeframe_model?: string;
+};
+type ChartSignals = {
+  markers?: SignalMarker[];
+  plan?: SignalPlan | null;
+  decision?: any;
+  summary?: any;
+};
+const TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h", "1d"];
+
 type PinEntry = { symbol: string; market: any; stream_connected: boolean };
 type SymbolResult = {
   symbol: string;
@@ -150,6 +177,14 @@ function App() {
   const [providerKey, setProviderKey] = useState("");
   const [drawMode, setDrawMode] = useState(false);
   const [drawVersion, setDrawVersion] = useState(0);
+  const [tf, setTf] = useState<string>(() => {
+    try {
+      return localStorage.getItem("pulseshift-tf") || "1m";
+    } catch {
+      return "1m";
+    }
+  });
+  const [sig, setSig] = useState<any>(null);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -395,10 +430,39 @@ function App() {
     return () => clearInterval(id);
   }, [active, data?.monitoring]);
 
+  // Strategy signals for the main chart: candles for the chosen timeframe
+  // plus BUY/EXIT markers, model setups and the entry/stop/target plan.
+  useEffect(() => {
+    try {
+      localStorage.setItem("pulseshift-tf", tf);
+    } catch {
+      /* ignore */
+    }
+    if (!active || active === "MULTI") return;
+    let cancelled = false;
+    setSig(null);
+    const load = async () => {
+      try {
+        const r = await fetch(
+          `${API}/api/signals?symbol=${active}&interval=${tf}&strategy=ai_regime_fusion`,
+        );
+        if (r.ok && !cancelled) setSig(await r.json());
+      } catch {
+        /* keep last overlay */
+      }
+    };
+    load();
+    const id = setInterval(load, tf === "1m" ? 15000 : 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [active, tf]);
+
   const runBt = async () => {
     let url =
       API +
-      `/api/backtest?symbol=${active}&interval=${btInterval}&limit=500&strategy=${btStrategy}`;
+      `/api/backtest?symbol=${active}&interval=${btInterval}&limit=1000&strategy=${btStrategy}`;
     if (btStart) url += `&start_ms=${new Date(btStart).getTime()}`;
     if (btEnd) url += `&end_ms=${new Date(btEnd).getTime()}`;
     const r = await fetch(url);
@@ -665,6 +729,17 @@ function App() {
                   <h2>{active}</h2>
                 </div>
                 <div className="intervals">
+                  {TIMEFRAMES.map((t) => (
+                    <button
+                      key={t}
+                      className={tf === t ? "active tfButton" : "tfButton"}
+                      title={`Show ${t} candles with strategy signals`}
+                      onClick={() => setTf(t)}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                  <span className="intervalDivider" />
                   {["vol", "ema", "bb", "rsi", "macd"].map((k) => (
                     <button
                       key={k}
@@ -698,18 +773,31 @@ function App() {
                   </button>
                 </div>
               </div>
-              <Chart
-                key={`${active}-${drawVersion}-${ind.join()}`}
-                symbol={active}
-                candles={data.candles}
-                overlays={data.patterns}
-                drawMode={drawMode}
-                onDrawn={() => setDrawMode(false)}
-                indicators={ind}
-              />
+              {tf === "1m" || sig?.interval === tf ? (
+                <Chart
+                  key={`${active}-${tf}-${drawVersion}-${ind.join()}`}
+                  symbol={active}
+                  candles={tf === "1m" ? data.candles : sig.candles}
+                  overlays={tf === "1m" ? data.patterns : undefined}
+                  signals={sig?.interval === tf ? sig : null}
+                  drawMode={drawMode}
+                  onDrawn={() => setDrawMode(false)}
+                  indicators={ind}
+                />
+              ) : (
+                <div className="chartWrap chartLoading">
+                  <em>Loading {tf} candles and signals…</em>
+                </div>
+              )}
+              <SignalStrip sig={sig?.interval === tf ? sig : null} tf={tf} />
               <div className="chartFooter">
-                <span>{data.candles.length} candles</span>
-                <span>Streaming live</span>
+                <span>
+                  {(tf === "1m" ? data.candles : sig?.candles || []).length}{" "}
+                  candles · {tf}
+                </span>
+                <span>
+                  {tf === "1m" ? "Streaming live" : "Refreshes every 30s"}
+                </span>
                 <span className="patternTags">
                   {(data.patterns?.patterns || []).map((p: any) => (
                     <em key={p.name} className={`patternTag ${p.bias}`}>
@@ -1187,7 +1275,7 @@ function App() {
               </div>
               <p>
                 Historical backtest on {active} — pick any past window (leave
-                dates blank for the latest 500 candles).
+                dates blank for the latest 1000 candles).
                 {bt?.window &&
                   ` Window: ${new Date(bt.window.start_ms).toLocaleDateString()} – ${new Date(bt.window.end_ms).toLocaleDateString()}, ${bt.window.candles} candles.`}
               </p>
@@ -1199,6 +1287,7 @@ function App() {
                       symbol={active}
                       candles={bt.candles}
                       overlays={bt.patterns}
+                      signals={bt.signals}
                       drawMode={false}
                     />
                   )}
@@ -1223,7 +1312,9 @@ function App() {
                 </div>
               )}
 
-              {evoError && <div className="inlineError evolutionError">{evoError}</div>}
+              {evoError && (
+                <div className="inlineError evolutionError">{evoError}</div>
+              )}
 
               {evolution && (
                 <div className="evolutionPanel">
@@ -1252,7 +1343,9 @@ function App() {
                     />
                     <Stat
                       label="Holdout PF"
-                      value={String(evolution.champion.test.profit_factor ?? "—")}
+                      value={String(
+                        evolution.champion.test.profit_factor ?? "—",
+                      )}
                     />
                     <Stat
                       label="Fitness"
@@ -1425,6 +1518,7 @@ function Chart({
   symbol,
   candles,
   overlays,
+  signals,
   drawMode,
   onDrawn,
   indicators = ["vol", "ema"],
@@ -1432,6 +1526,7 @@ function Chart({
   symbol: string;
   candles: Candle[];
   overlays?: any;
+  signals?: ChartSignals | null;
   drawMode: boolean;
   onDrawn?: () => void;
   indicators?: string[];
@@ -1440,6 +1535,9 @@ function Chart({
   const chartRef = useRef<any>(null);
   const seriesRef = useRef<any>(null);
   const pendingRef = useRef<TrendLine | null>(null);
+  const markersApiRef = useRef<any>(null);
+  const patternMarkersRef = useRef<any[]>([]);
+  const planLinesRef = useRef<any[]>([]);
   const drawModeRef = useRef(drawMode);
   drawModeRef.current = drawMode;
 
@@ -1708,7 +1806,8 @@ function Chart({
         1,
       );
     }
-    if (markers.length) createSeriesMarkers(series, markers);
+    patternMarkersRef.current = markers;
+    markersApiRef.current = createSeriesMarkers(series, markers);
 
     // Two-click trendline drawing.
     chart.subscribeClick((param: any) => {
@@ -1743,8 +1842,85 @@ function Chart({
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      markersApiRef.current = null;
+      planLinesRef.current = [];
     };
   }, [candles.length > 0]);
+
+  // Signals redraw in place (keeps zoom) whenever a new overlay arrives.
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series || !candles.length) return;
+    const markers: any[] = [...patternMarkersRef.current];
+    // Strategy signals: executed BUY/EXIT arrows, model setups (leans that
+    // need not beat fees) as small dots, and the current plan as labelled
+    // price lines. Markers outside the loaded candles are dropped.
+    const first = _tsOf(candles[0]);
+    const lastTs = _tsOf(candles[candles.length - 1]);
+    for (const m of signals?.markers || []) {
+      if (m.time < first || m.time > lastTs) continue;
+      if (m.side === "BUY")
+        markers.push({
+          time: m.time as any,
+          position: "belowBar",
+          color: "#2563eb",
+          shape: "arrowUp",
+          text: m.text,
+        });
+      else if (m.side === "SELL")
+        markers.push({
+          time: m.time as any,
+          position: "aboveBar",
+          color: m.open ? "#6b7280" : "#b45309",
+          shape: "arrowDown",
+          text: m.text,
+        });
+      else
+        markers.push({
+          time: m.time as any,
+          position: m.side === "SETUP_UP" ? "belowBar" : "aboveBar",
+          color: m.side === "SETUP_UP" ? "#16a34a99" : "#dc262699",
+          shape: "circle",
+          size: 0.6,
+          text: m.text,
+        });
+    }
+    for (const line of planLinesRef.current) series.removePriceLine(line);
+    planLinesRef.current = [];
+    const plan = signals?.plan;
+    if (plan) {
+      const style = plan.active ? 0 : 2; // solid when actionable, dashed = watch
+      const tag = plan.active ? plan.side : `${plan.side} watch`;
+      const add = (opts: any) =>
+        planLinesRef.current.push(series.createPriceLine(opts));
+      add({
+        price: plan.entry,
+        color: "#2563eb",
+        lineWidth: 1,
+        lineStyle: style,
+        axisLabelVisible: true,
+        title: `AI ENTRY ${tag}`,
+      });
+      add({
+        price: plan.stop,
+        color: "#c44f5e",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "AI STOP",
+      });
+      add({
+        price: plan.target,
+        color: "#168b6a",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "AI TARGET",
+      });
+    }
+    markers.sort((a, b) => (a.time as number) - (b.time as number));
+    markersApiRef.current?.setMarkers(markers);
+  }, [signals, candles.length > 0]);
 
   useEffect(() => {
     const c = candles[candles.length - 1];
@@ -1768,6 +1944,52 @@ function Chart({
       >
         Fit
       </button>
+    </div>
+  );
+}
+
+function SignalStrip({ sig, tf }: { sig: any; tf: string }) {
+  if (!sig)
+    return <div className="signalStrip muted">Loading {tf} signal…</div>;
+  const d = sig.decision || {};
+  const plan: SignalPlan | null = sig.plan || null;
+  const ic = plan?.reliability_ic ?? 0;
+  const reliable = d.regime !== "NO_EDGE";
+  const trades = (sig.markers || []).filter(
+    (m: SignalMarker) => m.side === "BUY",
+  ).length;
+  const setups = (sig.markers || []).filter((m: SignalMarker) =>
+    m.side.startsWith("SETUP"),
+  ).length;
+  return (
+    <div className={`signalStrip ${reliable ? "" : "muted"}`}>
+      <strong className={`sigAction ${String(d.action).toLowerCase()}`}>
+        {d.action || "—"}
+      </strong>
+      <span>{d.regime}</span>
+      {plan && (
+        <>
+          <span>
+            {plan.active ? "Plan" : "Watch"} {plan.side}: entry{" "}
+            <b>{plan.entry.toPrecision(6)}</b> · stop{" "}
+            <b className="neg">{plan.stop.toPrecision(6)}</b> · target{" "}
+            <b className="pos">{plan.target.toPrecision(6)}</b>
+          </span>
+          <span>
+            model {plan.expected_move_bps?.toFixed(1)} bps /{" "}
+            {plan.horizon_candles} candles vs cost {plan.cost_bps?.toFixed(0)}{" "}
+            bps
+          </span>
+        </>
+      )}
+      <span title="Out-of-sample correlation between the model's prediction and the realised move, measured in walk-forward tests for this timeframe">
+        reliability IC {ic >= 0 ? "+" : ""}
+        {ic.toFixed(3)}
+        {reliable ? "" : " — no reliable edge on this timeframe"}
+      </span>
+      <span>
+        {trades} trades · {setups} setups in window
+      </span>
     </div>
   );
 }

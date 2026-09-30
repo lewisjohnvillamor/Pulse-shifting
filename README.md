@@ -168,3 +168,48 @@ everything before block *k+1* and reports block *k+1* against buy-and-hold.
 Candles are cached under `data/research/`. Tuned params are printed (and
 saved with `--json`), never written to the live strategy config.
 Params marked `tunable=False` (e.g. fees) are never mutated.
+
+## AI Regime Fusion v3: per-timeframe model and chart signals
+
+`ai_regime_fusion` is driven by a small model per timeframe
+(`app/models/fusion_model.json`), built from volatility-normalised
+OHLCV and taker-buy order-flow features (`app/features.py`).
+
+Research findings behind it (`python -m app.modeling eval`, 6 symbols,
+walk-forward): the same features point opposite ways on different
+timeframes. 1m/5m candles **mean-revert**, 15m follows **order flow**, and
+4h/1d **trend**. One pooled model therefore cancels itself out. Each
+timeframe keeps only factors whose sign held across symbols and across
+time in its training data.
+
+Out-of-sample reliability (IC = correlation of prediction with the
+realised 12-candle move) is stored in the model and shown on the chart:
+
+| tf | 1m | 5m | 15m | 1h | 4h | 1d |
+|----|----|----|----|----|----|----|
+| IC | +0.041 | 0.000 | +0.024 | −0.058 | −0.002 | +0.093 |
+
+The strategy abstains where IC is not positive, and only enters when the
+predicted move beats the round trip (`fee_bps` x 2 + spread). At 10 bps
+taker fees only daily candles clear costs. At ~2 bps (maker/VIP) 15m
+became profitable in 6/6 unseen markets. Set `fee_bps` to your real
+fee.
+
+```bash
+python -m app.modeling eval                     # predictive power per timeframe
+python -m app.modeling eval-trade --fee-bps 2   # unseen-data backtest by timeframe
+python -m app.modeling train                    # refit and rewrite the model file
+```
+
+**Chart signals.** The main chart has a timeframe selector
+(1m…1d). It calls `GET /api/signals?symbol=&interval=` and draws:
+
+- BUY / EXIT arrows from a replay of the visible window, with the % result
+  on each exit;
+- green/red dots for **setups**: the model's strongest 10% leans, which
+  do not necessarily beat fees;
+- `AI ENTRY` / `AI STOP` / `AI TARGET` price lines for the current plan.
+  Lines are solid when actionable and dashed when watch-only.
+
+The strip under the chart shows the timeframe's reliability. The previous
+rule-based version stays available as `ai_regime_fusion_v2`.

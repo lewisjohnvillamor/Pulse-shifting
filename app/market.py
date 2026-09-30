@@ -150,6 +150,9 @@ class BinancePublicClient:
                 "close": float(row[4]),
                 "volume": float(row[5]),
                 "close_time": int(row[6]),
+                "trades": int(row[8]),
+                # Base volume bought by aggressive (taker) buyers: order flow.
+                "taker_buy_volume": float(row[9]),
             }
             for row in rows
         ]

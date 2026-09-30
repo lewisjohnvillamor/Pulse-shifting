@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .backtest import run_backtest
+from .backtest import run_backtest, signal_overlay, trade_markers
 from .evolution import run_evolution
 from .live_market import MarketHub, SymbolFeed
 from .market import BinancePublicClient, MarketSnapshot, normalize_symbol
@@ -268,6 +268,7 @@ async def reload_strategies():
     registry.reload()
     return {"strategies": [s["id"] for s in registry.describe()]}
 
+
 @app.post("/api/evolution/run")
 async def evolve_strategy(body: EvolutionIn):
     symbol = _clean_symbol(body.symbol)
@@ -326,7 +327,6 @@ async def promote_evolved_strategy(strategy_id: str, body: ParamsIn):
         "params": result,
         "note": "Promoted parameters are persisted locally. Paper trading remains enabled.",
     }
-
 
 
 @app.get("/api/config")
@@ -467,6 +467,52 @@ async def reset():
     return {"ok": True}
 
 
+def _plan_for(strategy, candles: list[dict]) -> dict | None:
+    try:
+        return strategy.decide(candles, 1.0).as_dict().get("levels")
+    except Exception:
+        return None
+
+
+SIGNAL_INTERVALS = {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"}
+
+
+@app.get("/api/signals")
+async def chart_signals(
+    symbol: str = "BTCUSDT",
+    interval: str = "1m",
+    limit: int = Query(default=1000, ge=100, le=1000),
+    strategy: str = "ai_regime_fusion",
+):
+    """Candles for any timeframe plus the strategy's chart overlay: past
+    BUY/EXIT markers from a replay of this window and the current
+    entry/stop/target plan."""
+    symbol = _clean_symbol(symbol)
+    if interval not in SIGNAL_INTERVALS:
+        raise HTTPException(status_code=400, detail=f"Unsupported interval {interval}")
+    instance = registry.get(strategy)
+    if instance is None:
+        raise HTTPException(status_code=404, detail=f"Unknown strategy: {strategy}")
+    try:
+        candles = await market.klines(symbol, interval=interval, limit=limit)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Market data unavailable: {exc}"
+        ) from exc
+    feed = hub.feed(symbol)
+    spread = feed.market.spread_bps if feed and feed.market else 1.0
+    overlay = await asyncio.to_thread(
+        signal_overlay, candles, instance, spread, broker.fee_bps
+    )
+    return {
+        "symbol": symbol,
+        "interval": interval,
+        "strategy": strategy,
+        "candles": candles[-300:],
+        **overlay,
+    }
+
+
 @app.get("/api/backtest")
 async def backtest(
     symbol: str = "BTCUSDT",
@@ -498,6 +544,11 @@ async def backtest(
                 detail=f"Only {len(candles)} candles in that window — widen it.",
             )
         result = run_backtest(candles, strategy=instance)
+        all_trades = result.pop("all_trades", [])
+        result["signals"] = {
+            "markers": trade_markers(all_trades),
+            "plan": _plan_for(instance, candles) if instance else None,
+        }
         result["symbol"] = symbol
         result["interval"] = interval
         result["patterns"] = detect_patterns(candles)

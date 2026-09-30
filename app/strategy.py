@@ -15,9 +15,11 @@ class Decision:
     regime_confidence: float
     execution_confidence: float
     reasons: list[str]
+    # Optional chart plan: {"side", "entry", "stop", "target", ...} prices.
+    levels: dict | None = None
 
     def as_dict(self) -> dict:
-        return {
+        out = {
             "action": self.action,
             "confidence": round(self.confidence, 4),
             "regime": self.regime,
@@ -25,6 +27,9 @@ class Decision:
             "execution_confidence": round(self.execution_confidence, 4),
             "reasons": self.reasons,
         }
+        if self.levels:
+            out["levels"] = self.levels
+        return out
 
 
 @dataclass

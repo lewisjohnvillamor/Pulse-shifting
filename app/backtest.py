@@ -28,6 +28,10 @@ def run_backtest(
     trades: list[dict] = []
     equity_curve = [cash]
 
+    # Strategies may pre-compute per-candle features for the whole series.
+    prepare = getattr(strategy, "prepare", None)
+    if prepare is not None:
+        prepare(candles)
     lookback = getattr(strategy, "max_lookback", None)
     for index in range(max(start_index, 0), len(candles)):
         start = max(0, index + 1 - lookback) if lookback else 0
@@ -42,7 +46,12 @@ def run_backtest(
                 entry_price = price
                 cash = 0.0
                 trades.append(
-                    {"side": "BUY", "price": price, "confidence": decision.confidence}
+                    {
+                        "side": "BUY",
+                        "price": price,
+                        "time": int(candles[index]["open_time"]),
+                        "confidence": decision.confidence,
+                    }
                 )
 
         elif _should_exit(strategy, window):
@@ -54,6 +63,7 @@ def run_backtest(
                 {
                     "side": "SELL",
                     "price": price,
+                    "time": int(candles[index]["open_time"]),
                     "pnl": pnl,
                     "confidence": None,
                 }
@@ -69,7 +79,16 @@ def run_backtest(
         fee = gross * fee_bps / 10_000
         cash = gross - fee
         pnl = (price - entry_price) * qty - fee
-        trades.append({"side": "SELL", "price": price, "pnl": pnl, "confidence": 1.0})
+        trades.append(
+            {
+                "side": "SELL",
+                "price": price,
+                "time": int(candles[-1]["open_time"]),
+                "pnl": pnl,
+                "confidence": 1.0,
+                "open": True,
+            }
+        )
 
     closed_trades = [trade for trade in trades if trade["side"] == "SELL"]
     wins = [trade for trade in closed_trades if trade.get("pnl", 0) > 0]
@@ -96,4 +115,87 @@ def run_backtest(
         "max_drawdown_pct": round(max_drawdown, 3),
         "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss else None,
         "trades": trades[-50:],
+        "all_trades": trades,
     }
+
+
+def trade_markers(trades: list[dict]) -> list[dict]:
+    """BUY/EXIT chart markers; exits are labelled with the trade's % result."""
+    out: list[dict] = []
+    entry = None
+    for t in trades:
+        if t["side"] == "BUY":
+            entry = t["price"]
+            text = "BUY"
+        else:
+            change = (t["price"] / entry - 1) * 100 if entry else 0.0
+            text = f"{'OPEN' if t.get('open') else 'EXIT'} {change:+.1f}%"
+            entry = None
+        out.append(
+            {
+                "time": t["time"] // 1000,
+                "side": t["side"],
+                "price": t["price"],
+                "text": text,
+                "open": bool(t.get("open")),
+            }
+        )
+    return out
+
+
+def signal_overlay(
+    candles: list[dict],
+    strategy: Strategy,
+    spread_bps: float = 1.0,
+    fee_bps: float = 10.0,
+) -> dict:
+    """Chart overlay for a strategy: BUY/SELL markers from a replay over
+    `candles`, plus the current decision and its entry/stop/target plan."""
+    start = max(int(getattr(strategy, "min_candles", 30)), 30)
+    replay = run_backtest(candles, fee_bps, strategy, start_index=start)
+    markers = trade_markers(replay["all_trades"])
+    markers += _setup_markers(candles, strategy)
+    decision = strategy.decide(candles, spread_bps).as_dict()
+    return {
+        "markers": markers,
+        "plan": decision.get("levels"),
+        "decision": decision,
+        "summary": {
+            k: replay[k]
+            for k in ("return_pct", "round_trips", "win_rate_pct", "max_drawdown_pct")
+        },
+    }
+
+
+def _setup_markers(
+    candles: list[dict], strategy: Strategy, top_frac: float = 0.1, cap: int = 40
+) -> list[dict]:
+    """Candles where the model's predicted move starts a new run in its
+    strongest `top_frac` (per direction) for this window. These are leans,
+    not trades: they need not beat fees."""
+    series = getattr(strategy, "edge_series", None)
+    if series is None:
+        return []
+    edges = series(candles)
+    finite = sorted(abs(e) for e in edges if e == e)
+    if len(finite) < 20:
+        return []
+    cut = finite[int(len(finite) * (1 - top_frac))]
+    if cut <= 0:
+        return []
+    out: list[dict] = []
+    prev = 0
+    for c, e in zip(candles, edges):
+        state = 0 if e != e or abs(e) < cut else (1 if e > 0 else -1)
+        if state and state != prev:
+            out.append(
+                {
+                    "time": int(c["open_time"]) // 1000,
+                    "side": "SETUP_UP" if state > 0 else "SETUP_DOWN",
+                    "price": float(c["close"]),
+                    "text": "",
+                    "edge_bps": round(e, 1),
+                }
+            )
+        prev = state
+    return out[-cap:]

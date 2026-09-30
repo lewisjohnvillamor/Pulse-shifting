@@ -49,6 +49,8 @@ class Strategy:
     name = "Base strategy"
     description = ""
     min_candles = 30
+    # Timeframes the strategy suits: "scalping", "day", "swing".
+    styles: list[str] = ["scalping", "day"]
     specs: list[ParamSpec] = []
 
     def __init__(self, params: dict[str, float] | None = None) -> None:
@@ -271,6 +273,7 @@ class BreakoutStrategy(Strategy):
     name = "Channel Breakout"
     description = "Long on a close above the N-candle high with volume confirmation; flat inside the channel."
     min_candles = 30
+    styles = ["day", "swing"]
     specs = [
         ParamSpec("channel", "int", 20, 10, 60, 1, "Channel length"),
         ParamSpec("volume_mult", "float", 1.2, 0.8, 3.0, 0.1, "Min volume × avg"),

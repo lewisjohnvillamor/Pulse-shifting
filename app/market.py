@@ -124,12 +124,20 @@ class BinancePublicClient:
         symbol: str = "BTCUSDT",
         interval: str = "1m",
         limit: int = 300,
+        start_time: int | None = None,
+        end_time: int | None = None,
     ) -> list[dict[str, float | int]]:
         limit = max(20, min(limit, 1000))
-        response = await self._get(
-            "/api/v3/klines",
-            params={"symbol": symbol, "interval": interval, "limit": limit},
-        )
+        params: dict[str, Any] = {
+            "symbol": symbol,
+            "interval": interval,
+            "limit": limit,
+        }
+        if start_time is not None:
+            params["startTime"] = start_time
+        if end_time is not None:
+            params["endTime"] = end_time
+        response = await self._get("/api/v3/klines", params=params)
         response.raise_for_status()
         rows = response.json()
 

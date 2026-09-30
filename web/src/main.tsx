@@ -43,6 +43,7 @@ type MarketData = {
   mode: string;
   stream_connected?: boolean;
   stream_last_event_ms?: number;
+  monitoring?: boolean;
 };
 type PinEntry = { symbol: string; market: any; stream_connected: boolean };
 type SymbolResult = {
@@ -71,7 +72,8 @@ const DEFAULT_LAYOUT: Layout[] = [
   { i: "execution", x: 8, y: 15, w: 4, h: 4, minW: 3, minH: 4 },
   { i: "ledger", x: 0, y: 13, w: 8, h: 6, minW: 4, minH: 4 },
   { i: "board", x: 8, y: 19, w: 4, h: 6, minW: 3, minH: 4 },
-  { i: "arena", x: 0, y: 19, w: 8, h: 6, minW: 3, minH: 3 },
+  { i: "monitor", x: 8, y: 25, w: 4, h: 4, minW: 3, minH: 3 },
+  { i: "arena", x: 0, y: 19, w: 8, h: 7, minW: 3, minH: 3 },
 ];
 
 function loadLayout(): Layout[] {
@@ -112,6 +114,11 @@ function App() {
   const [strategies, setStrategies] = useState<any[]>([]);
   const [focusStrategy, setFocusStrategy] = useState("ema_momentum");
   const [btStrategy, setBtStrategy] = useState("ema_momentum");
+  const [styleFilter, setStyleFilter] = useState("all");
+  const [monitorEvents, setMonitorEvents] = useState<any[]>([]);
+  const [btInterval, setBtInterval] = useState("5m");
+  const [btStart, setBtStart] = useState("");
+  const [btEnd, setBtEnd] = useState("");
 
   const refreshStrategies = useCallback(async () => {
     try {
@@ -292,11 +299,46 @@ function App() {
     setError("");
     refresh(active);
   };
+  const toggleMonitor = async () => {
+    const enabled = !(data?.monitoring === true);
+    const r = await fetch(`${API}/api/monitor/${active}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (r.ok) {
+      setData((current) =>
+        current ? { ...current, monitoring: enabled } : current,
+      );
+    }
+  };
+
+  // Poll monitor events while monitoring is on.
+  useEffect(() => {
+    if (!active || data?.monitoring !== true) {
+      setMonitorEvents([]);
+      return;
+    }
+    const load = async () => {
+      try {
+        const r = await fetch(`${API}/api/monitor/${active}?limit=8`);
+        if (r.ok) setMonitorEvents((await r.json()).events.reverse());
+      } catch {
+        /* ignore */
+      }
+    };
+    load();
+    const id = setInterval(load, 15000);
+    return () => clearInterval(id);
+  }, [active, data?.monitoring]);
+
   const runBt = async () => {
-    const r = await fetch(
+    let url =
       API +
-        `/api/backtest?symbol=${active}&interval=5m&limit=500&strategy=${btStrategy}`,
-    );
+      `/api/backtest?symbol=${active}&interval=${btInterval}&limit=500&strategy=${btStrategy}`;
+    if (btStart) url += `&start_ms=${new Date(btStart).getTime()}`;
+    if (btEnd) url += `&end_ms=${new Date(btEnd).getTime()}`;
+    const r = await fetch(url);
     setBt(await r.json());
   };
 
@@ -584,32 +626,95 @@ function App() {
                   <h2>Strategy board</h2>
                 </div>
               </div>
-              <div className="boardRows">
-                {strategies.map((s) => {
-                  const d = data.decisions?.[s.id];
-                  return (
-                    <button
-                      key={s.id}
-                      className={`boardRow ${focusStrategy === s.id ? "active" : ""}`}
-                      onClick={() => setFocusStrategy(s.id)}
-                      title={s.description}
-                    >
-                      <span className="boardName">
-                        {s.name}
-                        {!s.builtin && <em>plugin</em>}
-                      </span>
-                      <span
-                        className={`boardAction ${d?.action === "LONG" ? "up" : d?.action === "SHORT" ? "down" : ""}`}
-                      >
-                        {d?.action ?? "—"}
-                      </span>
-                      <span className="boardConf">
-                        {d ? Math.round(d.confidence * 100) + "%" : "—"}
-                      </span>
-                    </button>
-                  );
-                })}
+              <div className="styleChips">
+                {["all", "scalping", "day", "swing"].map((s) => (
+                  <button
+                    key={s}
+                    className={styleFilter === s ? "active" : ""}
+                    onClick={() => setStyleFilter(s)}
+                  >
+                    {s === "all" ? "All" : s === "day" ? "Day trade" : s}
+                  </button>
+                ))}
               </div>
+              <div className="boardRows">
+                {strategies
+                  .filter(
+                    (s) =>
+                      styleFilter === "all" ||
+                      (s.styles || []).includes(styleFilter),
+                  )
+                  .map((s) => {
+                    const d = data.decisions?.[s.id];
+                    return (
+                      <button
+                        key={s.id}
+                        className={`boardRow ${focusStrategy === s.id ? "active" : ""}`}
+                        onClick={() => setFocusStrategy(s.id)}
+                        title={s.description}
+                      >
+                        <span className="boardName">
+                          {s.name}
+                          {!s.builtin && <em>plugin</em>}
+                        </span>
+                        <span
+                          className={`boardAction ${d?.action === "LONG" ? "up" : d?.action === "SHORT" ? "down" : ""}`}
+                        >
+                          {d?.action ?? "—"}
+                        </span>
+                        <span className="boardConf">
+                          {d ? Math.round(d.confidence * 100) + "%" : "—"}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+            </section>
+
+            <section key="monitor" className="panel monitorPanel">
+              <div className="panelHeader compact">
+                <div>
+                  <span className="kicker">Watch</span>
+                  <h2>Signal monitor</h2>
+                </div>
+                <button
+                  className={`monitorToggle ${data.monitoring ? "on" : ""}`}
+                  onClick={toggleMonitor}
+                >
+                  {data.monitoring ? "Monitoring" : "Start monitoring"}
+                </button>
+              </div>
+              {data.monitoring ? (
+                monitorEvents.length ? (
+                  <ul className="monitorList">
+                    {monitorEvents.map((e, i) => (
+                      <li key={e.ts + i}>
+                        <span>{new Date(e.ts).toLocaleTimeString()}</span>
+                        <strong
+                          className={
+                            e.edge?.verdict?.startsWith("ENTER")
+                              ? "up"
+                              : e.edge?.verdict === "NO_TRADE"
+                                ? "down"
+                                : ""
+                          }
+                        >
+                          {(e.edge?.verdict || "—").replace(/_/g, " ")}
+                        </strong>
+                        <em>
+                          {Object.entries(e.decisions || {})
+                            .map(([sid, a]) => `${sid}:${a}`)
+                            .join(" · ")}
+                        </em>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <em>Recording signals to data/monitor/…</em>
+                )
+              ) : (
+                <em>Off — enable to log live entry/exit calls.</em>
+              )}
             </section>
 
             <section key="portfolio" className="panel portfolio">
@@ -780,14 +885,44 @@ function App() {
                       </option>
                     ))}
                   </select>
+                  <select
+                    value={btInterval}
+                    onChange={(e) => setBtInterval(e.target.value)}
+                  >
+                    {["1m", "5m", "15m", "1h", "4h", "1d"].map((i) => (
+                      <option key={i} value={i}>
+                        {i}
+                      </option>
+                    ))}
+                  </select>
                   <button className="runButton" onClick={runBt}>
                     <Play size={14} /> Run
                   </button>
                 </div>
               </div>
+              <div className="arenaRange">
+                <label>
+                  From
+                  <input
+                    type="datetime-local"
+                    value={btStart}
+                    onChange={(e) => setBtStart(e.target.value)}
+                  />
+                </label>
+                <label>
+                  To
+                  <input
+                    type="datetime-local"
+                    value={btEnd}
+                    onChange={(e) => setBtEnd(e.target.value)}
+                  />
+                </label>
+              </div>
               <p>
-                Backtest the selected strategy on {active} across the latest 500
-                five-minute candles.
+                Historical backtest on {active} — pick any past window (leave
+                dates blank for the latest 500 candles).
+                {bt?.window &&
+                  ` Window: ${new Date(bt.window.start_ms).toLocaleDateString()} – ${new Date(bt.window.end_ms).toLocaleDateString()}, ${bt.window.candles} candles.`}
               </p>
               {bt ? (
                 <div className="arenaStats">

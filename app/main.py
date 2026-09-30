@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .backtest import run_backtest
+from .evolution import run_evolution
 from .live_market import MarketHub, SymbolFeed
 from .market import BinancePublicClient, MarketSnapshot, normalize_symbol
 from .monitor import SignalMonitor
@@ -76,6 +77,19 @@ class ProviderIn(BaseModel):
     url: str | None = None
     api_key: str | None = None
     timeout_ms: int | None = None
+
+
+class EvolutionIn(BaseModel):
+    symbol: str = "BTCUSDT"
+    interval: str = "5m"
+    limit: int = Field(default=1000, ge=240, le=1000)
+    strategy_id: str = "ai_regime_fusion"
+    generations: int = Field(default=4, ge=1, le=20)
+    population: int = Field(default=16, ge=6, le=100)
+    elite_fraction: float = Field(default=0.2, ge=0.05, le=0.5)
+    mutation_rate: float = Field(default=0.35, ge=0.05, le=0.9)
+    mutation_scale: float = Field(default=0.10, ge=0.01, le=0.35)
+    seed: int = 42
 
 
 def _clean_symbol(symbol: str) -> str:
@@ -253,6 +267,66 @@ async def configure_strategy(strategy_id: str, body: ParamsIn):
 async def reload_strategies():
     registry.reload()
     return {"strategies": [s["id"] for s in registry.describe()]}
+
+@app.post("/api/evolution/run")
+async def evolve_strategy(body: EvolutionIn):
+    symbol = _clean_symbol(body.symbol)
+    strategy = registry.get(body.strategy_id)
+    if strategy is None:
+        raise HTTPException(
+            status_code=404, detail=f"Unknown strategy: {body.strategy_id}"
+        )
+    if not getattr(strategy, "specs", None):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Strategy {body.strategy_id} does not expose mutable parameters",
+        )
+
+    try:
+        candles = await market.klines(
+            symbol,
+            interval=body.interval,
+            limit=body.limit,
+        )
+        result = await asyncio.to_thread(
+            run_evolution,
+            candles,
+            strategy,
+            generations=body.generations,
+            population=body.population,
+            elite_fraction=body.elite_fraction,
+            mutation_rate=body.mutation_rate,
+            mutation_scale=body.mutation_scale,
+            seed=body.seed,
+        )
+        result["symbol"] = symbol
+        result["interval"] = body.interval
+        result["window"] = {
+            "start_ms": candles[0]["open_time"],
+            "end_ms": candles[-1]["close_time"],
+            "candles": len(candles),
+        }
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Evolution experiment failed: {exc}"
+        ) from exc
+
+
+@app.post("/api/evolution/promote/{strategy_id}")
+async def promote_evolved_strategy(strategy_id: str, body: ParamsIn):
+    result = registry.configure(strategy_id, body.params)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Unknown strategy: {strategy_id}")
+    return {
+        "ok": True,
+        "strategy_id": strategy_id,
+        "params": result,
+        "note": "Promoted parameters are persisted locally. Paper trading remains enabled.",
+    }
+
 
 
 @app.get("/api/config")

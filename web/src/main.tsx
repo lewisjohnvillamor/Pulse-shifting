@@ -5,7 +5,7 @@ import {Activity,BarChart3,BrainCircuit,FlaskConical,Play,RefreshCw,RotateCcw,Wa
 import './styles.css';
 
 type Candle={open_time:number;open:number;high:number;low:number;close:number;volume:number;close_time:number};
-type MarketData={market:any;decision:any;account:any;candles:Candle[];strategy:string;mode:string};
+type MarketData={market:any;decision:any;account:any;candles:Candle[];strategy:string;mode:string;stream_connected?:boolean;stream_last_event_ms?:number};
 const API='http://127.0.0.1:8000';
 const money=(n:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(n||0);
 const pct=(n:number)=>Number(n||0).toFixed(2)+'%';

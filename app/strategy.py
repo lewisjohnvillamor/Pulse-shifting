@@ -491,3 +491,161 @@ class BbSqueezeStrategy(Strategy):
             execution_confidence,
             reasons,
         )
+
+
+class RsiTrendPullbackStrategy(Strategy):
+    id = "rsi_trend_pullback"
+    name = "RSI Trend Pullback"
+    description = "Buys pullbacks inside an uptrend and sells rallies inside a downtrend using RSI plus an EMA trend filter."
+    min_candles = 60
+    styles = ["day", "swing"]
+    specs = [
+        ParamSpec("trend_ema", "int", 50, 20, 200, 1, "Trend EMA"),
+        ParamSpec("rsi_period", "int", 14, 7, 30, 1, "RSI period"),
+        ParamSpec("long_rsi", "float", 42, 25, 50, 1, "Long pullback RSI"),
+        ParamSpec("short_rsi", "float", 58, 50, 75, 1, "Short rally RSI"),
+    ]
+
+    def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
+        if len(candles) < self.min_candles:
+            return Decision("FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 60 candles"])
+
+        closes = [float(c["close"]) for c in candles]
+        price = closes[-1]
+        trend_period = int(self.params["trend_ema"])
+        trend = ema(closes[-trend_period:], trend_period)
+        rsi_value = rsi(closes, int(self.params["rsi_period"]))
+        execution_confidence = max(0.0, min(1.0, 1 - spread_bps / 12))
+        trend_gap = abs(price / trend - 1) if trend else 0.0
+        setup_strength = min(trend_gap * 120, 1.0)
+        confidence = min(0.99, 0.5 + 0.25 * setup_strength + 0.2 * execution_confidence)
+
+        if price > trend and rsi_value <= self.params["long_rsi"]:
+            action: Action = "LONG"
+        elif price < trend and rsi_value >= self.params["short_rsi"]:
+            action = "SHORT"
+        else:
+            action = "FLAT"
+
+        reasons = [
+            f"Price {'above' if price > trend else 'below'} EMA{trend_period}",
+            f"RSI {rsi_value:.1f}",
+            f"Spread {spread_bps:.2f} bps",
+        ]
+        return Decision(
+            action,
+            confidence,
+            "TREND_PULLBACK",
+            0.72,
+            execution_confidence,
+            reasons,
+        )
+
+
+class KeltnerBreakoutStrategy(Strategy):
+    id = "keltner_breakout"
+    name = "Keltner Breakout"
+    description = "Trades closes outside an EMA plus ATR envelope to capture volatility expansion."
+    min_candles = 60
+    styles = ["day", "swing"]
+    specs = [
+        ParamSpec("ema_period", "int", 20, 10, 80, 1, "Basis EMA"),
+        ParamSpec("atr_mult", "float", 1.8, 0.8, 4.0, 0.1, "ATR multiplier"),
+        ParamSpec("momentum", "int", 5, 2, 20, 1, "Momentum candles"),
+    ]
+
+    def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
+        if len(candles) < self.min_candles:
+            return Decision("FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 60 candles"])
+
+        closes = [float(c["close"]) for c in candles]
+        price = closes[-1]
+        period = int(self.params["ema_period"])
+        basis = ema(closes[-period:], period)
+        atr_abs = atr_pct(candles) * price
+        upper = basis + self.params["atr_mult"] * atr_abs
+        lower = basis - self.params["atr_mult"] * atr_abs
+        mom_n = int(self.params["momentum"])
+        momentum = price / closes[-mom_n - 1] - 1 if len(closes) > mom_n else 0.0
+        execution_confidence = max(0.0, min(1.0, 1 - spread_bps / 12))
+        distance = (
+            (price - upper) / atr_abs if price > upper and atr_abs
+            else (lower - price) / atr_abs if price < lower and atr_abs
+            else 0.0
+        )
+        confidence = min(0.99, 0.48 + 0.28 * min(abs(distance), 1.0) + 0.2 * execution_confidence)
+
+        if price > upper and momentum > 0:
+            action: Action = "LONG"
+        elif price < lower and momentum < 0:
+            action = "SHORT"
+        else:
+            action = "FLAT"
+
+        reasons = [
+            f"Keltner {lower:.4g}–{upper:.4g}",
+            f"{mom_n}-candle momentum {momentum * 100:+.2f}%",
+            f"Spread {spread_bps:.2f} bps",
+        ]
+        return Decision(
+            action,
+            confidence,
+            "VOLATILITY_BREAKOUT" if action != "FLAT" else "INSIDE_CHANNEL",
+            0.68,
+            execution_confidence,
+            reasons,
+        )
+
+
+class StochasticReversionStrategy(Strategy):
+    id = "stochastic_reversion"
+    name = "Stochastic Reversion"
+    description = "Fades short-term extremes using the stochastic oscillator, with a simple recent-range filter."
+    min_candles = 30
+    styles = ["scalping", "day"]
+    specs = [
+        ParamSpec("period", "int", 14, 7, 30, 1, "Stochastic period"),
+        ParamSpec("oversold", "float", 20, 5, 40, 1, "Oversold threshold"),
+        ParamSpec("overbought", "float", 80, 60, 95, 1, "Overbought threshold"),
+    ]
+
+    def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
+        if len(candles) < self.min_candles:
+            return Decision("FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 30 candles"])
+
+        period = int(self.params["period"])
+        window = candles[-period:]
+        high = max(float(c["high"]) for c in window)
+        low = min(float(c["low"]) for c in window)
+        price = float(candles[-1]["close"])
+        stoch = 50.0 if high == low else (price - low) / (high - low) * 100
+        execution_confidence = max(0.0, min(1.0, 1 - spread_bps / 12))
+        extreme = (
+            (self.params["oversold"] - stoch) / max(self.params["oversold"], 1)
+            if stoch < self.params["oversold"]
+            else (stoch - self.params["overbought"]) / max(100 - self.params["overbought"], 1)
+            if stoch > self.params["overbought"]
+            else 0.0
+        )
+        confidence = min(0.99, 0.5 + 0.3 * min(abs(extreme), 1.0) + 0.15 * execution_confidence)
+
+        if stoch <= self.params["oversold"]:
+            action: Action = "LONG"
+        elif stoch >= self.params["overbought"]:
+            action = "SHORT"
+        else:
+            action = "FLAT"
+
+        reasons = [
+            f"Stochastic %K {stoch:.1f}",
+            f"Range {low:.4g}–{high:.4g}",
+            f"Spread {spread_bps:.2f} bps",
+        ]
+        return Decision(
+            action,
+            confidence,
+            "MEAN_REVERSION",
+            0.66,
+            execution_confidence,
+            reasons,
+        )

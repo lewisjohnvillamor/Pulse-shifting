@@ -60,6 +60,10 @@ class AiRegimeFusionStrategy(Strategy):
         # Chandelier-style trailing stop, computed statelessly from the recent
         # extreme: exit a long once price closes `trail_atr` ATRs below the
         # highest close of the last `trail_period` candles. 0 disables it.
+        # Both this and the trend gate below default to off: in walk-forward
+        # tests (`python -m app.research --tune`, 16 markets, 2 folds) the
+        # tuner left the stop off, and seeding it on (3 ATR + EMA100 gate)
+        # scored +3.4% vs +4.5% without, with no drawdown improvement.
         ParamSpec("trail_atr", "float", 0.0, 0.0, 8.0, 0.1, "Trailing stop (× ATR, 0=off)"),
         ParamSpec("trail_period", "int", 22, 5, 120, 1, "Trailing stop look-back"),
         # Long-term trend gate: only take longs above this EMA (shorts below).

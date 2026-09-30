@@ -474,6 +474,39 @@ def _plan_for(strategy, candles: list[dict]) -> dict | None:
         return None
 
 
+_TREND_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+@app.get("/api/portfolio/trend")
+async def trend_portfolio(symbols: str = "", cost_bps: float = 12.0):
+    """Today's target weights for the validated trend + vol-target portfolio
+    (see app/portfolio.py). Defaults to the research universe plus pins."""
+    import time
+
+    from . import portfolio
+    from .alphalab import UNIVERSE
+
+    chosen = [_clean_symbol(x) for x in symbols.split(",") if x.strip()] or list(
+        dict.fromkeys([*UNIVERSE, *watchlist.symbols])
+    )
+    key = ",".join(chosen) + f"|{cost_bps}"
+    hit = _TREND_CACHE.get(key)
+    if hit and time.time() - hit[0] < 900:
+        return hit[1]
+
+    async def daily(sym: str):
+        try:
+            return sym, await market.klines(sym, interval="1d", limit=1000)
+        except Exception:
+            return sym, []
+
+    fetched = dict(await asyncio.gather(*(daily(s) for s in chosen)))
+    result = await asyncio.to_thread(portfolio.build, fetched, cost_bps)
+    result["skipped"] = [s for s in chosen if len(fetched.get(s, [])) < 140]
+    _TREND_CACHE[key] = (time.time(), result)
+    return result
+
+
 SIGNAL_INTERVALS = {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"}
 
 

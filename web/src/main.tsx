@@ -2007,6 +2007,7 @@ function Chart({
     if (plan) {
       const style = plan.active ? 0 : 2; // solid when actionable, dashed = watch
       const tag = plan.active ? plan.side : `${plan.side} watch`;
+      const pfx = plan.timeframe_model === "trend" ? "TREND" : "AI";
       const add = (opts: any) =>
         planLinesRef.current.push(series.createPriceLine(opts));
       add({
@@ -2015,7 +2016,7 @@ function Chart({
         lineWidth: 1,
         lineStyle: style,
         axisLabelVisible: true,
-        title: `AI ENTRY ${tag}`,
+        title: `${pfx} ENTRY ${tag}`,
       });
       add({
         price: plan.stop,
@@ -2023,7 +2024,7 @@ function Chart({
         lineWidth: 1,
         lineStyle: 2,
         axisLabelVisible: true,
-        title: "AI STOP",
+        title: `${pfx} STOP`,
       });
       add({
         price: plan.target,
@@ -2031,7 +2032,7 @@ function Chart({
         lineWidth: 1,
         lineStyle: 2,
         axisLabelVisible: true,
-        title: "AI TARGET",
+        title: `${pfx} TARGET`,
       });
     }
     markers.sort((a, b) => (a.time as number) - (b.time as number));

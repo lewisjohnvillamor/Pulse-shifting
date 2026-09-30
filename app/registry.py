@@ -137,6 +137,8 @@ class StrategyRegistry:
             for path in sorted(self.plugin_dir.glob("*.py")):
                 plugin = _load_python_plugin(path)
                 if plugin is not None:
+                    if plugin.id in saved and hasattr(plugin, "configure"):
+                        plugin.configure(saved[plugin.id])
                     found[plugin.id] = plugin
         self.strategies = found
 

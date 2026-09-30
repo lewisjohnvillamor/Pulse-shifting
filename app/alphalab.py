@@ -146,7 +146,14 @@ def fetch_funding(symbol: str, start: str = START) -> dict:
     with httpx.Client(base_url=ARCHIVE, timeout=30) as client:
         while (y, m) < (now.year, now.month):
             url = f"/data/futures/um/monthly/fundingRate/{symbol}/{symbol}-fundingRate-{y}-{m:02d}.zip"
-            r = client.get(url)
+            for attempt in range(4):
+                try:
+                    r = client.get(url)
+                    break
+                except httpx.HTTPError:
+                    if attempt == 3:
+                        raise
+                    time.sleep(2**attempt)
             if r.status_code == 200:
                 with zipfile.ZipFile(io.BytesIO(r.content)) as z:
                     text = z.read(z.namelist()[0]).decode()

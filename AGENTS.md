@@ -49,8 +49,13 @@ cd web && npm run build                # tsc -b && vite build
   requested.
 - `PaperBroker` tracks one position per symbol plus shared cash; account
   snapshots are computed against a `{symbol: price}` map.
-- Strategy logic stays in `app/strategy.py` and must remain symbol-agnostic
-  (it operates on candle lists only).
+- Strategies implement `Strategy.decide(candles, spread_bps)` in
+  `app/strategy.py` and must remain symbol-agnostic. Built-ins live in
+  `app/strategy.py`; user plugins drop into `strategies/` (`.py` or `.json`,
+  see `strategies/README.md`) and are loaded by `app/registry.py`. Editable
+  params are declared via `specs` and persist to `data/strategy_params.json`.
+- `app/signals.py` computes the spread+fee-aware entry/exit edge card
+  (`edge` in `/api/market` payloads).
 - The UI dashboard is a `react-grid-layout` grid; panel layout, pinned
   symbols, and the active tab persist in `localStorage`.
 - Don't commit `data/`, `.venv/`, `node_modules/`, or anything containing

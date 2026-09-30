@@ -14,16 +14,20 @@ from .backtest import run_backtest
 from .live_market import MarketHub, SymbolFeed
 from .market import BinancePublicClient, MarketSnapshot, normalize_symbol
 from .paper import PaperBroker
-from .strategy import EmaMomentumStrategy
+from .registry import StrategyRegistry
+from .signals import edge_assessment
 from .watchlist import Watchlist
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR.parent / "data"
 market = BinancePublicClient()
-strategy = EmaMomentumStrategy()
 broker = PaperBroker()
 hub = MarketHub(market)
 watchlist = Watchlist(DATA_DIR / "watchlist.json")
+registry = StrategyRegistry(
+    plugin_dir=BASE_DIR.parent / "strategies",
+    params_file=DATA_DIR / "strategy_params.json",
+)
 
 
 @asynccontextmanager
@@ -53,6 +57,10 @@ class OrderIn(BaseModel):
 
 class PinIn(BaseModel):
     symbol: str
+
+
+class ParamsIn(BaseModel):
+    params: dict[str, float]
 
 
 def _clean_symbol(symbol: str) -> str:
@@ -99,17 +107,43 @@ def _price_map(extra: dict[str, float] | None = None) -> dict[str, float]:
 
 def _market_payload(feed: SymbolFeed, snapshot: MarketSnapshot) -> dict:
     candles = feed.candles
-    decision = strategy.decide(candles, snapshot.spread_bps) if candles else None
+    decisions = registry.decide_all(candles, snapshot.spread_bps) if candles else {}
+    # Primary decision comes from the first registered (baseline) strategy.
+    primary_id = next(iter(registry.strategies), None)
+    decision = decisions.get(primary_id) if primary_id else None
+    primary = registry.get(primary_id) if primary_id else None
     return {
         "market": snapshot.as_dict(),
-        "decision": decision.as_dict() if decision else None,
+        "decision": decision,
+        "decisions": decisions,
+        "edge": edge_assessment(
+            candles,
+            snapshot,
+            None if primary is None else _decision_obj(decision),
+            fee_bps=broker.fee_bps,
+        ),
         "account": broker.snapshot(_price_map(), snapshot.symbol),
         "candles": candles[-120:],
-        "strategy": strategy.name,
+        "strategies": [s["id"] for s in registry.describe()],
         "mode": "PAPER",
         "stream_connected": feed.connected,
         "stream_last_event_ms": feed.last_event_ms,
     }
+
+
+def _decision_obj(d: dict | None):
+    from .strategy import Decision
+
+    if not d or "action" not in d:
+        return None
+    return Decision(
+        action=d["action"],
+        confidence=d["confidence"],
+        regime=d["regime"],
+        regime_confidence=d["regime_confidence"],
+        execution_confidence=d["execution_confidence"],
+        reasons=d["reasons"],
+    )
 
 
 @app.get("/")
@@ -180,6 +214,25 @@ async def unpin_symbol(symbol: str):
     if removed:
         await hub.unsubscribe(symbol)
     return {"symbols": watchlist.symbols}
+
+
+@app.get("/api/strategies")
+async def list_strategies():
+    return {"strategies": registry.describe()}
+
+
+@app.put("/api/strategies/{strategy_id}")
+async def configure_strategy(strategy_id: str, body: ParamsIn):
+    result = registry.configure(strategy_id, body.params)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Unknown strategy: {strategy_id}")
+    return {"id": strategy_id, "params": result}
+
+
+@app.post("/api/strategies/reload")
+async def reload_strategies():
+    registry.reload()
+    return {"strategies": [s["id"] for s in registry.describe()]}
 
 
 @app.get("/api/market")
@@ -258,12 +311,23 @@ async def reset():
 
 
 @app.get("/api/backtest")
-async def backtest(symbol: str = "BTCUSDT", interval: str = "5m", limit: int = 500):
+async def backtest(
+    symbol: str = "BTCUSDT",
+    interval: str = "5m",
+    limit: int = 500,
+    strategy: str | None = None,
+):
     symbol = _clean_symbol(symbol)
+    instance = None
+    if strategy:
+        instance = registry.get(strategy)
+        if instance is None:
+            raise HTTPException(status_code=404, detail=f"Unknown strategy: {strategy}")
     try:
         candles = await market.klines(symbol, interval=interval, limit=limit)
-        result = run_backtest(candles)
+        result = run_backtest(candles, strategy=instance)
         result["symbol"] = symbol
+        result["strategy_id"] = strategy or "ema_momentum"
         return result
     except Exception as exc:
         raise HTTPException(

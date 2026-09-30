@@ -35,9 +35,11 @@ type Candle = {
 type MarketData = {
   market: any;
   decision: any;
+  decisions?: Record<string, any>;
+  edge?: any;
   account: any;
   candles: Candle[];
-  strategy: string;
+  strategies?: string[];
   mode: string;
   stream_connected?: boolean;
   stream_last_event_ms?: number;
@@ -64,10 +66,12 @@ const DEFAULT_LAYOUT: Layout[] = [
   { i: "overview", x: 0, y: 0, w: 12, h: 2, minH: 2 },
   { i: "chart", x: 0, y: 2, w: 8, h: 11, minW: 4, minH: 6 },
   { i: "strategy", x: 8, y: 2, w: 4, h: 6, minW: 3, minH: 4 },
-  { i: "portfolio", x: 8, y: 8, w: 4, h: 3, minW: 3, minH: 3 },
-  { i: "execution", x: 8, y: 11, w: 4, h: 4, minW: 3, minH: 4 },
+  { i: "edge", x: 8, y: 8, w: 4, h: 4, minW: 3, minH: 3 },
+  { i: "portfolio", x: 8, y: 12, w: 4, h: 3, minW: 3, minH: 3 },
+  { i: "execution", x: 8, y: 15, w: 4, h: 4, minW: 3, minH: 4 },
   { i: "ledger", x: 0, y: 13, w: 8, h: 6, minW: 4, minH: 4 },
-  { i: "arena", x: 8, y: 15, w: 4, h: 4, minW: 3, minH: 3 },
+  { i: "board", x: 8, y: 19, w: 4, h: 6, minW: 3, minH: 4 },
+  { i: "arena", x: 0, y: 19, w: 8, h: 6, minW: 3, minH: 3 },
 ];
 
 function loadLayout(): Layout[] {
@@ -75,7 +79,16 @@ function loadLayout(): Layout[] {
     const raw = localStorage.getItem("pulseshift-layout");
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) return parsed;
+      if (Array.isArray(parsed) && parsed.length) {
+        const known = new Set(parsed.map((l: Layout) => l.i));
+        const missing = DEFAULT_LAYOUT.filter((l) => !known.has(l.i)).map(
+          (l) => ({
+            ...l,
+            y: Math.max(...parsed.map((p: Layout) => p.y + p.h), 0),
+          }),
+        );
+        return [...parsed, ...missing];
+      }
     }
   } catch {
     /* ignore */
@@ -96,6 +109,39 @@ function App() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SymbolResult[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [strategies, setStrategies] = useState<any[]>([]);
+  const [focusStrategy, setFocusStrategy] = useState("ema_momentum");
+  const [btStrategy, setBtStrategy] = useState("ema_momentum");
+
+  const refreshStrategies = useCallback(async () => {
+    try {
+      const r = await fetch(API + "/api/strategies");
+      if (r.ok) setStrategies((await r.json()).strategies);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  useEffect(() => {
+    refreshStrategies();
+  }, [refreshStrategies]);
+
+  const configureStrategy = async (
+    id: string,
+    params: Record<string, number>,
+  ) => {
+    const r = await fetch(`${API}/api/strategies/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ params }),
+    });
+    if (r.ok) {
+      const { params: updated } = await r.json();
+      setStrategies((list) =>
+        list.map((s) => (s.id === id ? { ...s, params: updated } : s)),
+      );
+      refresh(active);
+    }
+  };
 
   const refreshPins = useCallback(async () => {
     try {
@@ -159,6 +205,8 @@ function App() {
           ...current,
           market: packet.market,
           decision: packet.decision || current.decision,
+          decisions: packet.decisions || current.decisions,
+          edge: packet.edge || current.edge,
           account: packet.account || current.account,
           stream_connected: packet.stream_connected,
         };
@@ -246,7 +294,8 @@ function App() {
   };
   const runBt = async () => {
     const r = await fetch(
-      API + `/api/backtest?symbol=${active}&interval=5m&limit=500`,
+      API +
+        `/api/backtest?symbol=${active}&interval=5m&limit=500&strategy=${btStrategy}`,
     );
     setBt(await r.json());
   };
@@ -404,50 +453,163 @@ function App() {
                 </div>
                 <BrainCircuit size={18} />
               </div>
-              {data.decision ? (
-                <>
-                  <div className="decision">
-                    <div>
-                      <span>Current action</span>
-                      <strong
-                        className={
-                          data.decision.action === "LONG"
-                            ? "up"
-                            : data.decision.action === "SHORT"
-                              ? "down"
-                              : ""
-                        }
-                      >
-                        {data.decision.action}
-                      </strong>
+              {(() => {
+                const d = data.decisions?.[focusStrategy] ?? data.decision;
+                const meta = strategies.find((s) => s.id === focusStrategy);
+                if (!d) return <em>Warming up…</em>;
+                return (
+                  <>
+                    <div className="decision">
+                      <div>
+                        <span>Current action</span>
+                        <strong
+                          className={
+                            d.action === "LONG"
+                              ? "up"
+                              : d.action === "SHORT"
+                                ? "down"
+                                : ""
+                          }
+                        >
+                          {d.action}
+                        </strong>
+                      </div>
+                      <small>{meta?.name ?? focusStrategy}</small>
                     </div>
-                    <small>{data.strategy}</small>
+                    <Gauge label="Signal confidence" value={d.confidence} />
+                    <Gauge label="Regime fit" value={d.regime_confidence} />
+                    <Gauge
+                      label="Execution quality"
+                      value={d.execution_confidence}
+                    />
+                    <div className="regimeRow">
+                      <span>Market regime</span>
+                      <strong>{d.regime}</strong>
+                    </div>
+                    <ul className="reasons">
+                      {(d.reasons || []).map((r: string) => (
+                        <li key={r}>{r}</li>
+                      ))}
+                    </ul>
+                    {meta?.params?.length > 0 && (
+                      <div className="paramEditor">
+                        <span className="kicker">Parameters</span>
+                        {meta.params.map((p: any) => (
+                          <label key={p.name} className="paramRow">
+                            <span>{p.label || p.name}</span>
+                            <input
+                              type="number"
+                              step={p.step || 1}
+                              min={p.min}
+                              max={p.max}
+                              value={p.value}
+                              onChange={(e) =>
+                                configureStrategy(focusStrategy, {
+                                  [p.name]: Number(e.target.value),
+                                })
+                              }
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </section>
+
+            <section key="edge" className="panel edgePanel">
+              <div className="panelHeader compact">
+                <div>
+                  <span className="kicker">Live edge</span>
+                  <h2>Entry / exit</h2>
+                </div>
+              </div>
+              {data.edge ? (
+                <>
+                  <div
+                    className={`verdict ${data.edge.verdict.startsWith("ENTER") ? "up" : data.edge.verdict === "NO_TRADE" ? "" : "warn"}`}
+                  >
+                    {data.edge.verdict.replace(/_/g, " ")}
                   </div>
-                  <Gauge
-                    label="Signal confidence"
-                    value={data.decision.confidence}
-                  />
-                  <Gauge
-                    label="Regime fit"
-                    value={data.decision.regime_confidence}
-                  />
-                  <Gauge
-                    label="Execution quality"
-                    value={data.decision.execution_confidence}
-                  />
-                  <div className="regimeRow">
-                    <span>Market regime</span>
-                    <strong>{data.decision.regime}</strong>
+                  <div className="twoCol">
+                    <Stat
+                      label="Win probability"
+                      value={pct(data.edge.win_probability * 100)}
+                    />
+                    <Stat
+                      label="Net edge"
+                      value={`${data.edge.net_edge_pct >= 0 ? "+" : ""}${data.edge.net_edge_pct.toFixed(3)}%`}
+                    />
+                    <Stat
+                      label="Breakeven move"
+                      value={`${data.edge.breakeven_move_pct.toFixed(3)}%`}
+                    />
+                    <Stat
+                      label="Expected move"
+                      value={`${data.edge.expected_move_pct.toFixed(3)}%`}
+                    />
+                    <Stat
+                      label="Entry (bid)"
+                      value={money(data.edge.suggested_entry)}
+                    />
+                    <Stat
+                      label="Target"
+                      value={
+                        data.edge.suggested_target
+                          ? money(data.edge.suggested_target)
+                          : "—"
+                      }
+                    />
+                    <Stat
+                      label="Stop"
+                      value={
+                        data.edge.suggested_stop
+                          ? money(data.edge.suggested_stop)
+                          : "—"
+                      }
+                    />
                   </div>
-                  <ul className="reasons">
-                    {data.decision.reasons.map((r: string) => (
-                      <li key={r}>{r}</li>
-                    ))}
-                  </ul>
+                  <small className="edgeNote">{data.edge.note}</small>
                 </>
               ) : (
                 <em>Warming up…</em>
               )}
+            </section>
+
+            <section key="board" className="panel strategyBoard">
+              <div className="panelHeader compact">
+                <div>
+                  <span className="kicker">Compare</span>
+                  <h2>Strategy board</h2>
+                </div>
+              </div>
+              <div className="boardRows">
+                {strategies.map((s) => {
+                  const d = data.decisions?.[s.id];
+                  return (
+                    <button
+                      key={s.id}
+                      className={`boardRow ${focusStrategy === s.id ? "active" : ""}`}
+                      onClick={() => setFocusStrategy(s.id)}
+                      title={s.description}
+                    >
+                      <span className="boardName">
+                        {s.name}
+                        {!s.builtin && <em>plugin</em>}
+                      </span>
+                      <span
+                        className={`boardAction ${d?.action === "LONG" ? "up" : d?.action === "SHORT" ? "down" : ""}`}
+                      >
+                        {d?.action ?? "—"}
+                      </span>
+                      <span className="boardConf">
+                        {d ? Math.round(d.confidence * 100) + "%" : "—"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </section>
 
             <section key="portfolio" className="panel portfolio">
@@ -607,12 +769,24 @@ function App() {
                   <span className="kicker">Research</span>
                   <h2>Strategy arena</h2>
                 </div>
-                <button className="runButton" onClick={runBt}>
-                  <Play size={14} /> Run baseline
-                </button>
+                <div className="arenaControls">
+                  <select
+                    value={btStrategy}
+                    onChange={(e) => setBtStrategy(e.target.value)}
+                  >
+                    {strategies.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="runButton" onClick={runBt}>
+                    <Play size={14} /> Run
+                  </button>
+                </div>
               </div>
               <p>
-                Run the EMA Momentum baseline on {active} across the latest 500
+                Backtest the selected strategy on {active} across the latest 500
                 five-minute candles.
               </p>
               {bt ? (

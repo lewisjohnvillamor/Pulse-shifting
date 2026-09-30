@@ -22,9 +22,10 @@ PulseShift now uses a **Python/FastAPI quant engine** with a **React + TypeScrip
 - Professional candlestick chart
 - Live bid / ask / spread
 - Paper portfolio and simulated fills across multiple symbols
-- EMA Momentum v1 baseline
+- Pluggable strategies: built-ins (EMA Momentum, RSI Mean Reversion, Channel Breakout) plus drop-in `.py` / `.json` plugins in `strategies/` — see `strategies/README.md`
 - Signal, regime, and execution confidence
-- Transparent strategy reasons
+- Multi-strategy live comparison board with editable parameters
+- Real-time entry/exit edge card: spread+fee breakeven, net edge, entry/stop/target, win-probability estimate
 - Execution ledger
 - Quick 500 × 5-minute backtest
 - Return, win rate, max drawdown, and profit factor

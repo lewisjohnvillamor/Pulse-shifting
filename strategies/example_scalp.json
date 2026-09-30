@@ -1,0 +1,7 @@
+{
+  "id": "fast_scalp",
+  "name": "Fast Scalp",
+  "kind": "ema_momentum",
+  "description": "EMA momentum tuned for scalping: faster EMAs and a lower entry bar.",
+  "params": { "fast": 5, "slow": 13, "lookback": 3, "threshold": 0.55 }
+}

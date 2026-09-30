@@ -208,7 +208,10 @@ function App() {
     setPins(
       (symbols as string[]).map((s) => ({
         symbol: s,
-        market: s === symbol ? null : (pins.find((p) => p.symbol === s)?.market ?? null),
+        market:
+          s === symbol
+            ? null
+            : (pins.find((p) => p.symbol === s)?.market ?? null),
         stream_connected: false,
       })),
     );
@@ -218,7 +221,9 @@ function App() {
     setActive(symbol);
   };
   const unpin = async (symbol: string) => {
-    const r = await fetch(API + "/api/watchlist/" + symbol, { method: "DELETE" });
+    const r = await fetch(API + "/api/watchlist/" + symbol, {
+      method: "DELETE",
+    });
     if (r.ok) {
       const { symbols } = await r.json();
       setPins((current) => current.filter((p) => symbols.includes(p.symbol)));

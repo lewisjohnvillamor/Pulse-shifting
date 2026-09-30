@@ -87,7 +87,11 @@ def mutate_params(
     scale: float = 0.12,
 ) -> dict[str, float]:
     child = copy.deepcopy(params)
-    specs = list(getattr(strategy, "specs", []))
+    specs = [
+        spec
+        for spec in getattr(strategy, "specs", [])
+        if getattr(spec, "tunable", True)
+    ]
     touched = False
 
     for spec in specs:
@@ -187,9 +191,7 @@ def run_evolution(
     }
 
     history: list[dict[str, Any]] = []
-    population_params: list[tuple[dict[str, float], int | None]] = [
-        (base_params, None)
-    ]
+    population_params: list[tuple[dict[str, float], int | None]] = [(base_params, None)]
     while len(population_params) < population:
         population_params.append(
             (
@@ -224,9 +226,7 @@ def run_evolution(
             {
                 "generation": generation,
                 "best_fitness": round(ranked[0].fitness, 5),
-                "median_fitness": round(
-                    ranked[len(ranked) // 2].fitness, 5
-                ),
+                "median_fitness": round(ranked[len(ranked) // 2].fitness, 5),
                 "best_validation_return_pct": ranked[0].validation["return_pct"],
                 "best_validation_drawdown_pct": ranked[0].validation[
                     "max_drawdown_pct"
@@ -262,9 +262,7 @@ def run_evolution(
     )
 
     # Only now reveal the holdout test.
-    champion_test = run_backtest(
-        test, strategy=_instantiate(strategy, champion.params)
-    )
+    champion_test = run_backtest(test, strategy=_instantiate(strategy, champion.params))
     base_test = run_backtest(test, strategy=_instantiate(strategy, base_params))
 
     return {

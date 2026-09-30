@@ -36,6 +36,9 @@ class ParamSpec:
     max: float
     step: float = 0.0
     label: str = ""
+    # False for inputs that describe the environment (e.g. fees) rather than
+    # the policy; the evolutionary search must not "optimise" those.
+    tunable: bool = True
 
     def as_dict(self, value: float) -> dict:
         return {**self.__dict__, "value": value}
@@ -80,6 +83,17 @@ class Strategy:
         self, candles: list[dict], spread_bps: float = 0.0
     ) -> Decision:  # pragma: no cover - interface
         raise NotImplementedError
+
+    def should_exit(
+        self, candles: list[dict], spread_bps: float = 0.0, side: Action = "LONG"
+    ) -> bool:
+        """Whether an open `side` position should be closed on this candle.
+
+        The default exits as soon as the entry signal is no longer active.
+        Strategies override this to add hysteresis (hold until the signal
+        genuinely reverses) without having to track per-symbol state.
+        """
+        return self.decide(candles, spread_bps).action != side
 
 
 def ema(values: list[float], period: int) -> float:
@@ -508,7 +522,9 @@ class RsiTrendPullbackStrategy(Strategy):
 
     def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
         if len(candles) < self.min_candles:
-            return Decision("FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 60 candles"])
+            return Decision(
+                "FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 60 candles"]
+            )
 
         closes = [float(c["close"]) for c in candles]
         price = closes[-1]
@@ -556,7 +572,9 @@ class KeltnerBreakoutStrategy(Strategy):
 
     def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
         if len(candles) < self.min_candles:
-            return Decision("FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 60 candles"])
+            return Decision(
+                "FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 60 candles"]
+            )
 
         closes = [float(c["close"]) for c in candles]
         price = closes[-1]
@@ -569,11 +587,15 @@ class KeltnerBreakoutStrategy(Strategy):
         momentum = price / closes[-mom_n - 1] - 1 if len(closes) > mom_n else 0.0
         execution_confidence = max(0.0, min(1.0, 1 - spread_bps / 12))
         distance = (
-            (price - upper) / atr_abs if price > upper and atr_abs
-            else (lower - price) / atr_abs if price < lower and atr_abs
+            (price - upper) / atr_abs
+            if price > upper and atr_abs
+            else (lower - price) / atr_abs
+            if price < lower and atr_abs
             else 0.0
         )
-        confidence = min(0.99, 0.48 + 0.28 * min(abs(distance), 1.0) + 0.2 * execution_confidence)
+        confidence = min(
+            0.99, 0.48 + 0.28 * min(abs(distance), 1.0) + 0.2 * execution_confidence
+        )
 
         if price > upper and momentum > 0:
             action: Action = "LONG"
@@ -611,7 +633,9 @@ class StochasticReversionStrategy(Strategy):
 
     def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
         if len(candles) < self.min_candles:
-            return Decision("FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 30 candles"])
+            return Decision(
+                "FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 30 candles"]
+            )
 
         period = int(self.params["period"])
         window = candles[-period:]
@@ -623,11 +647,14 @@ class StochasticReversionStrategy(Strategy):
         extreme = (
             (self.params["oversold"] - stoch) / max(self.params["oversold"], 1)
             if stoch < self.params["oversold"]
-            else (stoch - self.params["overbought"]) / max(100 - self.params["overbought"], 1)
+            else (stoch - self.params["overbought"])
+            / max(100 - self.params["overbought"], 1)
             if stoch > self.params["overbought"]
             else 0.0
         )
-        confidence = min(0.99, 0.5 + 0.3 * min(abs(extreme), 1.0) + 0.15 * execution_confidence)
+        confidence = min(
+            0.99, 0.5 + 0.3 * min(abs(extreme), 1.0) + 0.15 * execution_confidence
+        )
 
         if stoch <= self.params["oversold"]:
             action: Action = "LONG"

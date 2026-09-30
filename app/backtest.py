@@ -3,6 +3,15 @@ from __future__ import annotations
 from .strategy import EmaMomentumStrategy, Strategy
 
 
+def _should_exit(strategy: Strategy, window: list[dict]) -> bool:
+    # Plugins that don't subclass Strategy may lack the hook; fall back to
+    # "exit once the long signal is gone".
+    hook = getattr(strategy, "should_exit", None)
+    if hook is not None:
+        return bool(hook(window, spread_bps=1.0, side="LONG"))
+    return strategy.decide(window, spread_bps=1.0).action != "LONG"
+
+
 def run_backtest(
     candles: list[dict], fee_bps: float = 10.0, strategy: Strategy | None = None
 ) -> dict:
@@ -17,18 +26,19 @@ def run_backtest(
     for index in range(30, len(candles)):
         window = candles[: index + 1]
         price = float(candles[index]["close"])
-        decision = strategy.decide(window, spread_bps=1.0)
 
-        if decision.action == "LONG" and qty == 0:
-            fee = cash * fee_bps / 10_000
-            qty = (cash - fee) / price
-            entry_price = price
-            cash = 0.0
-            trades.append(
-                {"side": "BUY", "price": price, "confidence": decision.confidence}
-            )
+        if qty == 0:
+            decision = strategy.decide(window, spread_bps=1.0)
+            if decision.action == "LONG":
+                fee = cash * fee_bps / 10_000
+                qty = (cash - fee) / price
+                entry_price = price
+                cash = 0.0
+                trades.append(
+                    {"side": "BUY", "price": price, "confidence": decision.confidence}
+                )
 
-        elif decision.action in ("SHORT", "FLAT") and qty > 0:
+        elif _should_exit(strategy, window):
             gross = qty * price
             fee = gross * fee_bps / 10_000
             cash = gross - fee
@@ -38,7 +48,7 @@ def run_backtest(
                     "side": "SELL",
                     "price": price,
                     "pnl": pnl,
-                    "confidence": decision.confidence,
+                    "confidence": None,
                 }
             )
             qty = 0.0

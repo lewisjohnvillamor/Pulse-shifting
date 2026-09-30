@@ -26,6 +26,10 @@ PulseShift now uses a **Python/FastAPI quant engine** with a **React + TypeScrip
 - Signal, regime, and execution confidence
 - Multi-strategy live comparison board with editable parameters
 - Real-time entry/exit edge card: spread+fee breakeven, net edge, entry/stop/target, win-probability estimate
+- Strategy style tags (scalping / day / swing) with a filter on the board
+- Opt-in signal monitor per symbol: logs every live entry/exit call to `data/monitor/<symbol>.jsonl`
+- Historical backtest arena: any strategy, interval (1m–1d), and past date window
+- `strategies/laya.py`: adapter that delegates decisions to a local Laya endpoint (`LAYA_URL`)
 - Execution ledger
 - Quick 500 × 5-minute backtest
 - Return, win rate, max drawdown, and profit factor

@@ -56,6 +56,9 @@ cd web && npm run build                # tsc -b && vite build
   params are declared via `specs` and persist to `data/strategy_params.json`.
 - `app/signals.py` computes the spread+fee-aware entry/exit edge card
   (`edge` in `/api/market` payloads).
+- `app/monitor.py` (SignalMonitor) logs opt-in per-symbol signal events to
+  `data/monitor/<symbol>.jsonl`.
+- Strategies declare `styles` ("scalping" | "day" | "swing") for the UI filter.
 - The UI dashboard is a `react-grid-layout` grid; panel layout, pinned
   symbols, and the active tab persist in `localStorage`.
 - Don't commit `data/`, `.venv/`, `node_modules/`, or anything containing

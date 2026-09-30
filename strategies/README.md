@@ -48,3 +48,10 @@ STRATEGY = MyStrategy
 
 External models (Jev, Laya, or any framework) plug in the same way: wrap the
 model's signal in `decide()` and ship it as a `STRATEGY`.
+
+## Laya
+
+`laya.py` is an adapter: it POSTs recent closes/volumes to `LAYA_URL`
+(default `http://127.0.0.1:8791/decide`) and maps the response to a
+Decision. Run any local model behind that endpoint and it appears on the
+board and in backtests; when offline it abstains (FLAT).

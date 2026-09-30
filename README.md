@@ -213,3 +213,37 @@ python -m app.modeling train                    # refit and rewrite the model fi
 
 The strip under the chart shows the timeframe's reliability. The previous
 rule-based version stays available as `ai_regime_fusion_v2`.
+
+## Alpha lab: six researched effects, tested out of sample
+
+`python -m app.alphalab <test>` downloads data from Binance's public
+spot API and archive (`data.binance.vision`, including perp funding) into
+`data/research/alphalab/`. It tests each idea on a 20-coin universe
+(2020-09 onward). Parameters come from the literature or from the first half
+only, and the verdict is taken on the **second, unseen half**, net of
+~12 bps per unit of turnover.
+
+| # | Idea (source) | Out-of-sample result | Verdict |
+|---|---|---|---|
+| 1 | Trend following + volatility targeting (EMA 8/32, 16/64, 32/128 days; 50% vol target) | Sharpe **1.17** vs 0.74 equal-weight and 1.04 BTC buy&hold; max DD **−24%** vs −70% / −53%; all 9 parameter variants Sharpe 1.02–1.24. 4h: 0.45 vs 0.33; 1h: no edge | **Shipped** |
+| 2 | Cross-sectional 3-week momentum, weekly rotation (Liu, Tsyvinski & Wu) | Rank IC ≈ 0 (+0.002); top-4 alone lags buy&hold; with trend filter it beat random picks in the second half (98th pct) but not the first (62nd) | Not robust |
+| 3 | Hour-of-day / weekday seasonality (21–23 UTC window) | Hourly means don't persist (corr −0.12); window +7 bps/day gross vs 24 bps cost; weekday signs flip | Rejected |
+| 4 | BTC → altcoin lead-lag | IC ≈ 0 at 1m–1h, sign-unstable; +0.7 bps after big BTC moves vs 20 bps cost (published lags are seconds) | Rejected |
+| 5 | Perp funding rate | Adds little beyond trend (partial IC +0.030 → +0.015); "flat when crowded" cut Sharpe 1.17 → 0.81 | Not adopted |
+| 6 | Gradient-boosted trees vs factor model | Mixed per timeframe; differences within noise (±0.02–0.04 IC) | Not adopted |
+
+Survivorship bias: the universe holds coins that still trade today, which
+flatters every long-only result, buy&hold included.
+
+**What shipped:**
+
+- `trend_vol_target` strategy: per-coin, with vol-targeted `levels.size`.
+  It abstains below 4h.
+- `GET /api/portfolio/trend` and the **Trend portfolio** panel: today's
+  target weights across the universe plus pinned symbols.
+- The chart overlay can draw either the AI model or the Trend strategy.
+
+The AI model (`ai_regime_fusion`) and Trend do different jobs. On unseen
+daily data the AI model earned more (+94% avg, −53% avg max DD, 6 symbols).
+Trend earned less with far smaller drawdowns (+32%, −21%, profitable 6/6).
+Gating the AI model with trend did not improve it.

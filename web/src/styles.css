@@ -1122,17 +1122,16 @@ td {
   flex-wrap: wrap;
 }
 .patternTag {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #bae6f2;
+  background: #f0f9fc;
+  color: #0e7490;
   border-radius: 999px;
   padding: 1px 8px;
 }
-.patternTag.bullish {
-  color: #168b6a;
-  border-color: #bfe6d8;
-}
+.patternTag.bullish,
 .patternTag.bearish {
-  color: #c44f5e;
-  border-color: #f2c9cf;
+  color: #0e7490;
+  border-color: #bae6f2;
 }
 
 /* --- v0.9: chart wrap, fit button, indicators, multi view --- */

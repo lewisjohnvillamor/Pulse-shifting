@@ -16,10 +16,13 @@ function App(){
  const [bt,setBt]=useState<any>(null);
  const [amount,setAmount]=useState(250);
  const chartRef=useRef<HTMLDivElement>(null);
+ const chartApiRef=useRef<any>(null);
+ const seriesRef=useRef<any>(null);
 
  const refresh=async()=>{try{const r=await fetch(API+'/api/market');if(!r.ok)throw new Error(await r.text());setData(await r.json());setError('')}catch(e:any){setError(e.message)}};
- useEffect(()=>{refresh();const id=setInterval(refresh,5000);return()=>clearInterval(id)},[]);
- useEffect(()=>{if(!chartRef.current||!data?.candles)return;chartRef.current.innerHTML='';const chart=createChart(chartRef.current,{height:430,layout:{background:{color:'#ffffff'},textColor:'#6b7280',fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace'},grid:{vertLines:{color:'#f0f2f5'},horzLines:{color:'#f0f2f5'}},rightPriceScale:{borderColor:'#e5e7eb'},timeScale:{borderColor:'#e5e7eb',timeVisible:true,secondsVisible:false}});const series=chart.addSeries(CandlestickSeries,{upColor:'#168b6a',downColor:'#c44f5e',wickUpColor:'#168b6a',wickDownColor:'#c44f5e',borderVisible:false});series.setData(data.candles.map(c=>({time:(c.open_time/1000) as any,open:c.open,high:c.high,low:c.low,close:c.close})));chart.timeScale().fitContent();const obs=new ResizeObserver(()=>chart.applyOptions({width:chartRef.current?.clientWidth||900}));obs.observe(chartRef.current);return()=>{obs.disconnect();chart.remove()}},[data?.candles]);
+ useEffect(()=>{refresh();const ws=new WebSocket('ws://127.0.0.1:8000/ws/market');ws.onmessage=(event)=>{const packet=JSON.parse(event.data);if(packet.type!=='market')return;setData(current=>{if(!current)return current;const next={...current,market:packet.market,decision:packet.decision||current.decision,account:packet.account||current.account,stream_connected:packet.stream_connected};if(packet.candle){const candles=[...current.candles];const i=candles.length-1;if(i>=0&&candles[i].open_time===packet.candle.open_time)candles[i]=packet.candle;else candles.push(packet.candle);next.candles=candles.slice(-120)}return next})};ws.onerror=()=>setError('Live market stream disconnected');ws.onopen=()=>setError('');return()=>ws.close()},[]);
+ useEffect(()=>{if(!chartRef.current||!data?.candles?.length||chartApiRef.current)return;const chart=createChart(chartRef.current,{height:430,layout:{background:{color:'#ffffff'},textColor:'#6b7280',fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace'},grid:{vertLines:{color:'#f0f2f5'},horzLines:{color:'#f0f2f5'}},rightPriceScale:{borderColor:'#e5e7eb'},timeScale:{borderColor:'#e5e7eb',timeVisible:true,secondsVisible:false}});const series=chart.addSeries(CandlestickSeries,{upColor:'#168b6a',downColor:'#c44f5e',wickUpColor:'#168b6a',wickDownColor:'#c44f5e',borderVisible:false});series.setData(data.candles.map(c=>({time:(c.open_time/1000) as any,open:c.open,high:c.high,low:c.low,close:c.close})));chart.timeScale().fitContent();chartApiRef.current=chart;seriesRef.current=series;const obs=new ResizeObserver(()=>chart.applyOptions({width:chartRef.current?.clientWidth||900}));obs.observe(chartRef.current);return()=>{obs.disconnect();chart.remove();chartApiRef.current=null;seriesRef.current=null}},[!!data?.candles?.length]);
+ useEffect(()=>{const c=data?.candles?.[data.candles.length-1];if(!c||!seriesRef.current)return;seriesRef.current.update({time:(c.open_time/1000) as any,open:c.open,high:c.high,low:c.low,close:c.close})},[data?.candles?.[data.candles.length-1]?.close,data?.candles?.[data.candles.length-1]?.high,data?.candles?.[data.candles.length-1]?.low]);
 
  const order=async(side:string)=>{const r=await fetch(API+'/api/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({side,amount_usd:amount})});if(!r.ok){setError((await r.json()).detail||'Order failed');return}setError('');refresh()};
  const runBt=async()=>{const r=await fetch(API+'/api/backtest?interval=5m&limit=500');setBt(await r.json())};
@@ -30,7 +33,7 @@ function App(){
    <header className="topbar">
     <div className="brand"><div className="brandMark">P</div><div><strong>PulseShift</strong><span>Local quant research</span></div></div>
     <nav><button className="active">Terminal</button><button disabled>Replay</button><button disabled>Research</button></nav>
-    <div className="marketStatus"><span className="statusDot"/> Paper trading <span>·</span> Binance</div>
+    <div className="marketStatus"><span className="statusDot"/> Paper only <span>·</span> {data.stream_connected===false?"Reconnecting":"Live Binance stream"}</div>
    </header>
 
    <main className="workspace">
@@ -70,8 +73,8 @@ function App(){
         <section className="panel execution">
           <div className="panelHeader compact"><div><span className="kicker">Simulator</span><h2>Paper execution</h2></div><BarChart3 size={18}/></div>
           <label>Notional (USDT)</label><input type="number" value={amount} min={10} step={10} onChange={e=>setAmount(Number(e.target.value))}/>
-          <div className="tradeButtons"><button className="buy" onClick={()=>order('BUY')}>Buy BTC</button><button className="sell" onClick={()=>order('SELL')}>Sell BTC</button></div>
-          <button className="secondary" onClick={()=>order('CLOSE')}>Close position</button>
+          <div className="tradeButtons"><button className="tradeButton buy" onClick={()=>order('BUY')}><span>Buy BTC</span><small>Simulated ask fill</small></button><button className="tradeButton sell" onClick={()=>order('SELL')}><span>Sell BTC</span><small>Simulated bid fill</small></button></div>
+          <button className="secondary actionButton" onClick={()=>order('CLOSE')}>Close full position</button>
           <button className="linkButton" onClick={async()=>{await fetch(API+'/api/reset',{method:'POST'});refresh()}}><RotateCcw size={14}/> Reset paper account</button>
           {error&&<div className="inlineError">{error}</div>}
         </section>

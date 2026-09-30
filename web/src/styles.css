@@ -1091,3 +1091,123 @@ td {
   align-items: center;
   gap: 4px;
 }
+
+/* --- v0.8: uniform card padding --- */
+.panel:not(.overview)
+  > *:not(.panelHeader):not(.chart):not(.tableWrap):not(.dragHint) {
+  padding-left: 14px;
+  padding-right: 14px;
+}
+.panel:not(.overview) > .tableWrap {
+  padding: 0 10px 10px;
+}
+.panel:not(.overview) > .chart {
+  padding: 0 6px;
+}
+.panel:not(.overview) {
+  padding-bottom: 10px;
+}
+.boardRows {
+  margin: 4px 0 8px;
+}
+.chartFooter {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: #6b7280;
+}
+.patternTags {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.patternTag {
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.patternTag.bullish {
+  color: #168b6a;
+  border-color: #bfe6d8;
+}
+.patternTag.bearish {
+  color: #c44f5e;
+  border-color: #f2c9cf;
+}
+
+/* --- v0.9: chart wrap, fit button, indicators, multi view --- */
+.chartWrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.chartWrap .chart {
+  position: absolute;
+  inset: 0;
+}
+.fitButton {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 5;
+  font-size: 10px;
+  padding: 2px 8px;
+}
+.chartPanel {
+  display: flex;
+  flex-direction: column;
+}
+.chartPanel .chartFooter {
+  padding: 6px 14px 8px;
+}
+.intervals button {
+  font-size: 10px;
+}
+.multiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 14px;
+}
+.multiCell {
+  display: flex;
+  flex-direction: column;
+  min-height: 340px;
+  padding: 10px 12px 12px;
+  gap: 6px;
+}
+.multiHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.multiHead strong {
+  font-size: 15px;
+}
+.verdictMini {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #eef1f4;
+}
+.verdictMini.long {
+  background: var(--greenSoft);
+  color: var(--green);
+}
+.verdictMini.short {
+  background: #fde8ea;
+  color: #c44f5e;
+}
+.multiCell .chartWrap {
+  min-height: 170px;
+}
+.multiLoading {
+  color: var(--muted);
+  font-size: 11px;
+}
+.verdict.mini {
+  margin: 0;
+  font-size: 11px;
+  padding: 6px 10px;
+}

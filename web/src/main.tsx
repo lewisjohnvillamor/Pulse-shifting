@@ -1528,17 +1528,14 @@ function Chart({
           [lv.t0, lv.price],
           [lv.t1, lv.price],
         ],
-        lv.kind === "support" ? "#168b6a" : "#c44f5e",
+        lv.kind === "support" ? "#0e7490" : "#0891b2",
         2,
       );
     }
     for (const pat of overlays?.patterns || []) {
-      const color =
-        pat.bias === "bullish"
-          ? "#168b6a"
-          : pat.bias === "bearish"
-            ? "#c44f5e"
-            : "#64748b";
+      // Auto-detected pattern geometry uses cyan/teal so it cannot be
+      // confused with candle direction or manual violet drawings.
+      const color = pat.bias === "neutral" ? "#0e7490" : "#0891b2";
       const pts = pat.points || [];
       for (let i = 0; i + 1 < pts.length; i += 2)
         addOverlayLine([pts[i], pts[i + 1]], color);

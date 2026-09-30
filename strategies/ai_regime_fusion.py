@@ -16,7 +16,7 @@ class AiRegimeFusionStrategy(Strategy):
     """
 
     id = "ai_regime_fusion"
-    name = "AI Regime Fusion v1"
+    name = "AI Regime Fusion v2"
     description = (
         "Adaptive ensemble of trend, momentum, VWAP reversion, breakout, "
         "volume and volatility signals with regime-aware weighting and abstention."
@@ -24,34 +24,34 @@ class AiRegimeFusionStrategy(Strategy):
     min_candles = 80
     styles = ["scalping", "day", "swing"]
     specs = [
-        ParamSpec("entry_threshold", "float", 0.38, 0.15, 0.8, 0.01, "Entry score"),
-        ParamSpec("min_consensus", "float", 0.56, 0.5, 0.9, 0.01, "Minimum consensus"),
-        ParamSpec("trend_fast", "int", 9, 5, 30, 1, "Fast EMA"),
-        ParamSpec("trend_slow", "int", 34, 20, 120, 1, "Slow EMA"),
-        ParamSpec("vwap_period", "int", 48, 20, 160, 1, "VWAP window"),
-        ParamSpec("breakout_period", "int", 24, 10, 80, 1, "Breakout window"),
-        ParamSpec("trend_regime_threshold", "float", 0.35, 0.15, 0.75, 0.01, "Trend regime threshold"),
-        ParamSpec("high_vol_threshold", "float", 0.006, 0.002, 0.02, 0.001, "High-vol threshold"),
-        ParamSpec("tr_trend", "float", 0.38, 0.02, 0.8, 0.01, "Trending · trend weight"),
-        ParamSpec("tr_momentum", "float", 0.27, 0.02, 0.8, 0.01, "Trending · momentum weight"),
-        ParamSpec("tr_reversion", "float", 0.08, 0.0, 0.6, 0.01, "Trending · reversion weight"),
-        ParamSpec("tr_breakout", "float", 0.27, 0.02, 0.8, 0.01, "Trending · breakout weight"),
-        ParamSpec("rg_trend", "float", 0.12, 0.0, 0.6, 0.01, "Ranging · trend weight"),
-        ParamSpec("rg_momentum", "float", 0.13, 0.0, 0.6, 0.01, "Ranging · momentum weight"),
-        ParamSpec("rg_reversion", "float", 0.55, 0.05, 0.9, 0.01, "Ranging · reversion weight"),
-        ParamSpec("rg_breakout", "float", 0.20, 0.0, 0.7, 0.01, "Ranging · breakout weight"),
-        ParamSpec("hv_trend", "float", 0.22, 0.0, 0.7, 0.01, "High vol · trend weight"),
-        ParamSpec("hv_momentum", "float", 0.23, 0.0, 0.7, 0.01, "High vol · momentum weight"),
-        ParamSpec("hv_reversion", "float", 0.15, 0.0, 0.7, 0.01, "High vol · reversion weight"),
-        ParamSpec("hv_breakout", "float", 0.40, 0.05, 0.9, 0.01, "High vol · breakout weight"),
+        ParamSpec("entry_threshold", "float", 0.3, 0.15, 0.8, 0.01, "Entry score"),
+        ParamSpec("min_consensus", "float", 0.64, 0.5, 0.9, 0.01, "Minimum consensus"),
+        ParamSpec("trend_fast", "int", 12, 5, 30, 1, "Fast EMA"),
+        ParamSpec("trend_slow", "int", 77, 20, 120, 1, "Slow EMA"),
+        ParamSpec("vwap_period", "int", 67, 20, 160, 1, "VWAP window"),
+        ParamSpec("breakout_period", "int", 46, 10, 80, 1, "Breakout window"),
+        ParamSpec("trend_regime_threshold", "float", 0.37, 0.15, 0.75, 0.01, "Trend regime threshold"),
+        ParamSpec("high_vol_threshold", "float", 0.002, 0.002, 0.02, 0.001, "High-vol threshold"),
+        ParamSpec("tr_trend", "float", 0.39, 0.02, 0.8, 0.01, "Trending · trend weight"),
+        ParamSpec("tr_momentum", "float", 0.29, 0.02, 0.8, 0.01, "Trending · momentum weight"),
+        ParamSpec("tr_reversion", "float", 0.04, 0.0, 0.6, 0.01, "Trending · reversion weight"),
+        ParamSpec("tr_breakout", "float", 0.38, 0.02, 0.8, 0.01, "Trending · breakout weight"),
+        ParamSpec("rg_trend", "float", 0.19, 0.0, 0.6, 0.01, "Ranging · trend weight"),
+        ParamSpec("rg_momentum", "float", 0.26, 0.0, 0.6, 0.01, "Ranging · momentum weight"),
+        ParamSpec("rg_reversion", "float", 0.77, 0.05, 0.9, 0.01, "Ranging · reversion weight"),
+        ParamSpec("rg_breakout", "float", 0.31, 0.0, 0.7, 0.01, "Ranging · breakout weight"),
+        ParamSpec("hv_trend", "float", 0.16, 0.0, 0.7, 0.01, "High vol · trend weight"),
+        ParamSpec("hv_momentum", "float", 0.35, 0.0, 0.7, 0.01, "High vol · momentum weight"),
+        ParamSpec("hv_reversion", "float", 0.1, 0.0, 0.7, 0.01, "High vol · reversion weight"),
+        ParamSpec("hv_breakout", "float", 0.55, 0.05, 0.9, 0.01, "High vol · breakout weight"),
         # Hysteresis: once long, hold until the score falls below this level
         # instead of exiting the moment it dips under the entry threshold.
-        ParamSpec("exit_threshold", "float", 0.0, -0.6, 0.4, 0.01, "Exit score (hold above)"),
+        ParamSpec("exit_threshold", "float", -0.35, -0.6, 0.4, 0.01, "Exit score (hold above)"),
         # Cost filter: only enter when ATR over the expected holding horizon
         # covers `min_edge_multiple` round trips of fees + spread.
-        ParamSpec("fee_bps", "float", 10.0, 0.0, 50.0, 0.5, "Taker fee per side (bps)"),
-        ParamSpec("edge_horizon", "int", 12, 1, 60, 1, "Expected hold (candles)"),
-        ParamSpec("min_edge_multiple", "float", 1.5, 0.0, 6.0, 0.1, "Min move / round-trip cost"),
+        ParamSpec("fee_bps", "float", 10.0, 0.0, 50.0, 0.5, "Taker fee per side (bps)", tunable=False),
+        ParamSpec("edge_horizon", "int", 15, 1, 60, 1, "Expected hold (candles)"),
+        ParamSpec("min_edge_multiple", "float", 0.1, 0.0, 6.0, 0.1, "Min move / round-trip cost"),
         # Backtests showed SHORT calls were anti-predictive (dips tended to
         # bounce), so shorts are opt-in.
         ParamSpec("allow_short", "int", 0, 0, 1, 1, "Allow SHORT signals (0/1)"),

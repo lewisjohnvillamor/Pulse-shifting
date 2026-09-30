@@ -36,6 +36,9 @@ class ParamSpec:
     max: float
     step: float = 0.0
     label: str = ""
+    # False for inputs that describe the environment (e.g. fees) rather than
+    # the policy; the evolutionary search must not "optimise" those.
+    tunable: bool = True
 
     def as_dict(self, value: float) -> dict:
         return {**self.__dict__, "value": value}

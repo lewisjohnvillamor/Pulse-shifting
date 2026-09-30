@@ -55,6 +55,9 @@ class Strategy:
     # Timeframes the strategy suits: "scalping", "day", "swing".
     styles: list[str] = ["scalping", "day"]
     specs: list[ParamSpec] = []
+    # Candles of history `decide` actually reads. None means "all of it";
+    # replays use this to avoid re-slicing the whole series every candle.
+    max_lookback: int | None = None
 
     def __init__(self, params: dict[str, float] | None = None) -> None:
         self.params = {spec.name: spec.default for spec in self.specs}

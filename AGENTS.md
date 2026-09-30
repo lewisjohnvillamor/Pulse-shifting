@@ -54,6 +54,11 @@ cd web && npm run build                # tsc -b && vite build
   `app/strategy.py`; user plugins drop into `strategies/` (`.py` or `.json`,
   see `strategies/README.md`) and are loaded by `app/registry.py`. Editable
   params are declared via `specs` and persist to `data/strategy_params.json`.
+- Backtests are long-only replays (`app/backtest.py`). While in a position
+  they call `Strategy.should_exit(candles, spread_bps, side)`; override it
+  for hysteresis/stops. Set `max_lookback` on a strategy to bound the window.
+- `python -m app.research` runs multi-market walk-forward evaluation/tuning;
+  judge strategy changes on its out-of-sample output, not one backtest.
 - `app/signals.py` computes the spread+fee-aware entry/exit edge card
   (`edge` in `/api/market` payloads).
 - `app/monitor.py` (SignalMonitor) logs opt-in per-symbol signal events to

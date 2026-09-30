@@ -22,6 +22,8 @@ class AiRegimeFusionStrategy(Strategy):
         "volume and volatility signals with regime-aware weighting and abstention."
     )
     min_candles = 80
+    # Longest look-back: 3x the slowest EMA (trend_slow / regime_ema max).
+    max_lookback = 1000
     styles = ["scalping", "day", "swing"]
     specs = [
         ParamSpec("entry_threshold", "float", 0.3, 0.15, 0.8, 0.01, "Entry score"),
@@ -55,6 +57,14 @@ class AiRegimeFusionStrategy(Strategy):
         # Backtests showed SHORT calls were anti-predictive (dips tended to
         # bounce), so shorts are opt-in.
         ParamSpec("allow_short", "int", 0, 0, 1, 1, "Allow SHORT signals (0/1)"),
+        # Chandelier-style trailing stop, computed statelessly from the recent
+        # extreme: exit a long once price closes `trail_atr` ATRs below the
+        # highest close of the last `trail_period` candles. 0 disables it.
+        ParamSpec("trail_atr", "float", 0.0, 0.0, 8.0, 0.1, "Trailing stop (× ATR, 0=off)"),
+        ParamSpec("trail_period", "int", 22, 5, 120, 1, "Trailing stop look-back"),
+        # Long-term trend gate: only take longs above this EMA (shorts below).
+        # 0 disables it.
+        ParamSpec("regime_ema", "int", 0, 0, 300, 1, "Trend gate EMA (0=off)"),
     ]
 
     @staticmethod
@@ -182,6 +192,21 @@ class AiRegimeFusionStrategy(Strategy):
             expected_move_bps / round_trip_bps if round_trip_bps else float("inf")
         )
 
+        # Trailing stop: distance from the recent extreme in ATRs.
+        trail_n = int(self.params["trail_period"])
+        recent_high = max(closes[-trail_n:])
+        recent_low = min(closes[-trail_n:])
+        drop_from_high_atr = (recent_high - price) / atr_abs if atr_abs else 0.0
+        rise_from_low_atr = (price - recent_low) / atr_abs if atr_abs else 0.0
+
+        # Long-term trend gate.
+        gate_n = int(self.params["regime_ema"])
+        if gate_n > 0:
+            gate_ema = ema(closes[-min(len(closes), 3 * gate_n) :], gate_n)
+            gate_dir = 1 if price > gate_ema else -1
+        else:
+            gate_dir = 0
+
         return {
             "score": score,
             "consensus": consensus,
@@ -196,7 +221,18 @@ class AiRegimeFusionStrategy(Strategy):
             "realized_vol": realized_vol,
             "execution_confidence": execution_confidence,
             "edge_multiple": edge_multiple,
+            "drop_from_high_atr": drop_from_high_atr,
+            "rise_from_low_atr": rise_from_low_atr,
+            "gate_dir": gate_dir,
         }
+
+    def _stopped(self, f: dict, side: Action) -> bool:
+        trail = self.params["trail_atr"]
+        if trail <= 0:
+            return False
+        if side == "LONG":
+            return f["drop_from_high_atr"] >= trail
+        return f["rise_from_low_atr"] >= trail
 
     def _warming_up(self, candles: list[dict]) -> bool:
         return len(candles) < self.min_candles
@@ -206,11 +242,13 @@ class AiRegimeFusionStrategy(Strategy):
     ) -> bool:
         if self._warming_up(candles):
             return False
-        score = self._evaluate(candles, spread_bps)["score"]
+        f = self._evaluate(candles, spread_bps)
+        if self._stopped(f, side):
+            return True
         exit_level = self.params["exit_threshold"]
         if side == "LONG":
-            return score < exit_level
-        return score > -exit_level
+            return f["score"] < exit_level
+        return f["score"] > -exit_level
 
     def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
         if self._warming_up(candles):
@@ -228,14 +266,17 @@ class AiRegimeFusionStrategy(Strategy):
         exit_level = self.params["exit_threshold"]
         edge_ok = f["edge_multiple"] >= self.params["min_edge_multiple"]
         shorts_on = self.params["allow_short"] >= 0.5
+        long_ok = f["gate_dir"] >= 0 and not self._stopped(f, "LONG")
+        short_ok = f["gate_dir"] <= 0 and not self._stopped(f, "SHORT")
 
-        if score >= threshold and consensus >= min_consensus and edge_ok:
+        if score >= threshold and consensus >= min_consensus and edge_ok and long_ok:
             action: Action = "LONG"
         elif (
             shorts_on
             and score <= -threshold
             and consensus >= min_consensus
             and edge_ok
+            and short_ok
         ):
             action = "SHORT"
         else:
@@ -272,6 +313,16 @@ class AiRegimeFusionStrategy(Strategy):
         ]
         if action == "FLAT" and not edge_ok and abs(score) >= threshold:
             reasons.append("Signal present but too small to beat fees — abstaining")
+        if action == "FLAT" and score >= threshold and f["gate_dir"] < 0:
+            reasons.append(
+                f"Bullish score, but price is below EMA{int(self.params['regime_ema'])}"
+                " trend gate"
+            )
+        if self.params["trail_atr"] > 0:
+            reasons.append(
+                f"Trailing stop {self.params['trail_atr']:.1f} ATR · now"
+                f" {f['drop_from_high_atr']:.1f} ATR below {int(self.params['trail_period'])}-bar high"
+            )
         if action == "FLAT" and not shorts_on and score <= -threshold:
             reasons.append("Bearish score, but shorts are disabled (allow_short=0)")
 

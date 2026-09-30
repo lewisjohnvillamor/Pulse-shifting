@@ -64,6 +64,13 @@ cd web && npm run build                # tsc -b && vite build
   and evaluation in `app/modeling.py`). Retrain with
   `python -m app.modeling train` and commit the JSON. Decisions may carry
   `levels` (entry/stop/target) which the chart draws via `GET /api/signals`.
+- `python -m app.alphalab <test>` holds the out-of-sample tests of the
+  six researched effects (trend, xsmom, seasonality, leadlag, funding, gbm)
+  on a 20-coin universe; data cached under `data/research/alphalab/`.
+  Only `trend` validated: it ships as `strategies/trend_vol_target.py` and
+  `app/portfolio.py` (`GET /api/portfolio/trend`, Trend portfolio panel).
+  Decisions may carry `levels["size"]` (fraction of equity) which
+  `run_backtest` honours.
 - `app/signals.py` computes the spread+fee-aware entry/exit edge card
   (`edge` in `/api/market` payloads).
 - `app/monitor.py` (SignalMonitor) logs opt-in per-symbol signal events to

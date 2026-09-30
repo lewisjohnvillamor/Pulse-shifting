@@ -1469,3 +1469,12 @@ td {
   height: 100%;
   background: #2563eb;
 }
+
+.sigStrategySelect {
+  font-size: 11px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  padding: 2px 4px;
+  margin-left: 4px;
+}

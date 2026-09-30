@@ -186,6 +186,15 @@ function App() {
     }
   });
   const [sig, setSig] = useState<any>(null);
+  const [sigStrategy, setSigStrategy] = useState<string>(() => {
+    try {
+      return (
+        localStorage.getItem("pulseshift-sig-strategy") || "ai_regime_fusion"
+      );
+    } catch {
+      return "ai_regime_fusion";
+    }
+  });
   const [trendPf, setTrendPf] = useState<any>(null);
 
   const loadConfig = useCallback(async () => {
@@ -437,6 +446,7 @@ function App() {
   useEffect(() => {
     try {
       localStorage.setItem("pulseshift-tf", tf);
+      localStorage.setItem("pulseshift-sig-strategy", sigStrategy);
     } catch {
       /* ignore */
     }
@@ -446,7 +456,7 @@ function App() {
     const load = async () => {
       try {
         const r = await fetch(
-          `${API}/api/signals?symbol=${active}&interval=${tf}&strategy=ai_regime_fusion`,
+          `${API}/api/signals?symbol=${active}&interval=${tf}&strategy=${sigStrategy}`,
         );
         if (r.ok && !cancelled) setSig(await r.json());
       } catch {
@@ -459,7 +469,7 @@ function App() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [active, tf]);
+  }, [active, tf, sigStrategy]);
 
   // Validated trend + vol-target portfolio (daily); refresh every 15 min.
   useEffect(() => {
@@ -756,6 +766,15 @@ function App() {
                       {t}
                     </button>
                   ))}
+                  <select
+                    className="sigStrategySelect"
+                    value={sigStrategy}
+                    title="Whose signals to draw on the chart"
+                    onChange={(e) => setSigStrategy(e.target.value)}
+                  >
+                    <option value="ai_regime_fusion">AI model</option>
+                    <option value="trend_vol_target">Trend (1d/4h)</option>
+                  </select>
                   <span className="intervalDivider" />
                   {["vol", "ema", "bb", "rsi", "macd"].map((k) => (
                     <button
@@ -2049,7 +2068,8 @@ function SignalStrip({ sig, tf }: { sig: any; tf: string }) {
   if (!sig)
     return <div className="signalStrip muted">Loading {tf} signal…</div>;
   const d = sig.decision || {};
-  const plan: SignalPlan | null = sig.plan || null;
+  const plan: (SignalPlan & { size?: number }) | null = sig.plan || null;
+  const hasModel = plan?.reliability_ic !== undefined;
   const ic = plan?.reliability_ic ?? 0;
   const reliable = d.regime !== "NO_EDGE";
   const trades = (sig.markers || []).filter(
@@ -2059,34 +2079,45 @@ function SignalStrip({ sig, tf }: { sig: any; tf: string }) {
     m.side.startsWith("SETUP"),
   ).length;
   return (
-    <div className={`signalStrip ${reliable ? "" : "muted"}`}>
+    <div
+      className={`signalStrip ${reliable && d.action !== "FLAT" ? "" : "muted"}`}
+    >
       <strong className={`sigAction ${String(d.action).toLowerCase()}`}>
         {d.action || "—"}
       </strong>
       <span>{d.regime}</span>
       {plan && (
-        <>
-          <span>
-            {plan.active ? "Plan" : "Watch"} {plan.side}: entry{" "}
-            <b>{plan.entry.toPrecision(6)}</b> · stop{" "}
-            <b className="neg">{plan.stop.toPrecision(6)}</b> · target{" "}
-            <b className="pos">{plan.target.toPrecision(6)}</b>
-          </span>
-          <span>
-            model {plan.expected_move_bps?.toFixed(1)} bps /{" "}
-            {plan.horizon_candles} candles vs cost {plan.cost_bps?.toFixed(0)}{" "}
-            bps
-          </span>
-        </>
+        <span>
+          {plan.active ? "Plan" : "Watch"} {plan.side}: entry{" "}
+          <b>{plan.entry.toPrecision(6)}</b> · stop{" "}
+          <b className="neg">{plan.stop.toPrecision(6)}</b> · target{" "}
+          <b className="pos">{plan.target.toPrecision(6)}</b>
+        </span>
       )}
-      <span title="Out-of-sample correlation between the model's prediction and the realised move, measured in walk-forward tests for this timeframe">
-        reliability IC {ic >= 0 ? "+" : ""}
-        {ic.toFixed(3)}
-        {reliable ? "" : " — no reliable edge on this timeframe"}
-      </span>
+      {plan?.expected_move_bps !== undefined && (
+        <span>
+          model {plan.expected_move_bps.toFixed(1)} bps / {plan.horizon_candles}{" "}
+          candles vs cost {plan.cost_bps?.toFixed(0)} bps
+        </span>
+      )}
+      {plan?.size !== undefined && (
+        <span>
+          size {(plan.size * 100).toFixed(0)}% of allocation (vol target)
+        </span>
+      )}
+      {hasModel && (
+        <span title="Out-of-sample correlation between the model's prediction and the realised move, measured in walk-forward tests for this timeframe">
+          reliability IC {ic >= 0 ? "+" : ""}
+          {ic.toFixed(3)}
+          {reliable ? "" : " — no reliable edge on this timeframe"}
+        </span>
+      )}
       <span>
-        {trades} trades · {setups} setups in window
+        {trades} trades{setups ? ` · ${setups} setups` : ""} in window
       </span>
+      {d.reasons?.length > 0 && !reliable && (
+        <span>{d.reasons[d.reasons.length - 1]}</span>
+      )}
     </div>
   );
 }

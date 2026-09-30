@@ -7,18 +7,28 @@ from pathlib import Path
 from typing import Any
 
 from .strategy import (
+    BbSqueezeStrategy,
     BreakoutStrategy,
     Decision,
+    DonchianTrendStrategy,
     EmaMomentumStrategy,
     MeanReversionStrategy,
     Strategy,
+    VwapReversionStrategy,
 )
 
 log = logging.getLogger("pulseshift.strategies")
 
 BUILTINS: dict[str, type[Strategy]] = {
     cls.id: cls
-    for cls in (EmaMomentumStrategy, MeanReversionStrategy, BreakoutStrategy)
+    for cls in (
+        EmaMomentumStrategy,
+        MeanReversionStrategy,
+        BreakoutStrategy,
+        VwapReversionStrategy,
+        DonchianTrendStrategy,
+        BbSqueezeStrategy,
+    )
 }
 
 # Declarative JSON strategy templates users can author without Python.

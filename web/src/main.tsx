@@ -5,6 +5,7 @@ import {
   createSeriesMarkers,
   CandlestickSeries,
   LineSeries,
+  HistogramSeries,
 } from "lightweight-charts";
 import GridLayout, { Layout, WidthProvider } from "react-grid-layout";
 import {
@@ -12,6 +13,7 @@ import {
   BarChart3,
   BrainCircuit,
   FlaskConical,
+  LayoutGrid,
   Pin,
   Play,
   Plus,
@@ -71,6 +73,14 @@ const money = (n: number) =>
 const pct = (n: number) => Number(n || 0).toFixed(2) + "%";
 const baseOf = (symbol: string) => symbol.replace(/USDT$/, "");
 
+const INDICATOR_LABELS: Record<string, string> = {
+  vol: "Volume histogram",
+  ema: "EMA 9 / 50",
+  bb: "Bollinger Bands (20, 2σ)",
+  rsi: "RSI 14",
+  macd: "MACD (12, 26, 9)",
+};
+
 const DEFAULT_LAYOUT: Layout[] = [
   { i: "overview", x: 0, y: 0, w: 12, h: 2, minH: 2 },
   { i: "chart", x: 0, y: 2, w: 8, h: 11, minW: 4, minH: 6 },
@@ -111,6 +121,7 @@ function App() {
   const [active, setActive] = useState<string>(
     () => localStorage.getItem("pulseshift-active") || "",
   );
+  const isMulti = active === "MULTI";
   const [data, setData] = useState<MarketData | null>(null);
   const [error, setError] = useState("");
   const [bt, setBt] = useState<any>(null);
@@ -128,6 +139,7 @@ function App() {
   const [btInterval, setBtInterval] = useState("5m");
   const [btStart, setBtStart] = useState("");
   const [btEnd, setBtEnd] = useState("");
+  const [ind, setInd] = useState<string[]>(["vol", "ema"]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [providers, setProviders] = useState<any>({});
   const [providerName, setProviderName] = useState("jev");
@@ -226,7 +238,10 @@ function App() {
   }, [refreshPins]);
   useEffect(() => {
     if (!pins.length) return;
-    if (!active || !pins.some((p) => p.symbol === active)) {
+    if (
+      !active ||
+      (active !== "MULTI" && !pins.some((p) => p.symbol === active))
+    ) {
       setActive(pins[0].symbol);
     }
   }, [pins, active]);
@@ -242,7 +257,7 @@ function App() {
 
   // Load + stream the active symbol.
   useEffect(() => {
-    if (!active) return;
+    if (!active || active === "MULTI") return;
     setData(null);
     setBt(null);
     refresh(active);
@@ -398,6 +413,13 @@ function App() {
           </div>
         </div>
         <nav className="symbolTabs">
+          <button
+            className={isMulti ? "active" : ""}
+            onClick={() => setActive("MULTI")}
+            title="All pinned symbols side by side"
+          >
+            <LayoutGrid size={13} /> All
+          </button>
           {pins.map((p) => (
             <button
               key={p.symbol}
@@ -530,7 +552,9 @@ function App() {
       )}
 
       <main className="workspace">
-        {!data ? (
+        {isMulti ? (
+          <MultiView pins={pins} />
+        ) : !data ? (
           <div className="loading">
             <span>PulseShift</span>
             <small>Connecting to the local quant engine…</small>
@@ -587,6 +611,22 @@ function App() {
                   <h2>{active}</h2>
                 </div>
                 <div className="intervals">
+                  {["vol", "ema", "bb", "rsi", "macd"].map((k) => (
+                    <button
+                      key={k}
+                      className={ind.includes(k) ? "active" : ""}
+                      title={INDICATOR_LABELS[k]}
+                      onClick={() =>
+                        setInd((list) =>
+                          list.includes(k)
+                            ? list.filter((x) => x !== k)
+                            : [...list, k],
+                        )
+                      }
+                    >
+                      {k.toUpperCase()}
+                    </button>
+                  ))}
                   <button
                     className={drawMode ? "active" : ""}
                     onClick={() => setDrawMode((v) => !v)}
@@ -605,12 +645,13 @@ function App() {
                 </div>
               </div>
               <Chart
-                key={`${active}-${drawVersion}`}
+                key={`${active}-${drawVersion}-${ind.join()}`}
                 symbol={active}
                 candles={data.candles}
                 overlays={data.patterns}
                 drawMode={drawMode}
                 onDrawn={() => setDrawMode(false)}
+                indicators={ind}
               />
               <div className="chartFooter">
                 <span>{data.candles.length} candles</span>
@@ -1127,7 +1168,130 @@ function App() {
 }
 
 type TrendLine = { t1: number; p1: number; t2: number; p2: number };
+
+// Split-screen view: every pinned symbol's chart + live signal side by side.
+function MultiView({ pins }: { pins: PinEntry[] }) {
+  const [data, setData] = useState<Record<string, MarketData>>({});
+  useEffect(() => {
+    let dead = false;
+    const load = async () => {
+      const out: Record<string, MarketData> = {};
+      await Promise.all(
+        pins.map(async (p) => {
+          try {
+            const r = await fetch(API + "/api/market?symbol=" + p.symbol);
+            if (r.ok) out[p.symbol] = await r.json();
+          } catch {
+            /* ignore */
+          }
+        }),
+      );
+      if (!dead) setData(out);
+    };
+    load();
+    const id = setInterval(load, 6000);
+    return () => {
+      dead = true;
+      clearInterval(id);
+    };
+  }, [pins]);
+
+  return (
+    <div className="multiGrid">
+      {pins.map((p) => {
+        const d = data[p.symbol];
+        const best = d?.decisions
+          ? Object.entries(d.decisions)
+              .filter(([, v]: [string, any]) => v && v.action)
+              .sort(
+                (a, b) => (b[1] as any).confidence - (a[1] as any).confidence,
+              )[0]
+          : null;
+        const edge = d?.edge;
+        return (
+          <section key={p.symbol} className="panel multiCell">
+            <div className="multiHead">
+              <strong>{baseOf(p.symbol)}</strong>
+              <span className="tabPrice">
+                {p.market ? money(p.market.price) : "—"}
+              </span>
+              {best && (
+                <em
+                  className={`verdictMini ${(best[1] as any).action.toLowerCase()}`}
+                >
+                  {(best[1] as any).action}{" "}
+                  {Math.round((best[1] as any).confidence * 100)}% · {best[0]}
+                </em>
+              )}
+            </div>
+            {d ? (
+              <Chart
+                symbol={p.symbol}
+                candles={d.candles}
+                overlays={d.patterns}
+                drawMode={false}
+                indicators={["vol", "ema"]}
+              />
+            ) : (
+              <em className="multiLoading">Loading…</em>
+            )}
+            {edge && (
+              <div
+                className={`verdict mini ${edge.verdict.startsWith("ENTER") ? "up" : edge.verdict === "WAIT_EDGE" ? "warn" : ""}`}
+              >
+                {edge.verdict} — net edge {edge.net_edge_pct}% · win{" "}
+                {Math.round(edge.win_probability * 100)}%
+              </div>
+            )}
+            <div className="patternTags">
+              {(d?.patterns?.patterns || []).map((p2: any) => (
+                <em key={p2.name} className={`patternTag ${p2.bias}`}>
+                  {p2.name} → {p2.entry}
+                </em>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+      {!pins.length && <em>Pin some symbols to compare them here.</em>}
+    </div>
+  );
+}
 const _tsOf = (c: Candle) => Math.floor(c.open_time / 1000);
+
+// Indicator helpers — all computed locally from candle arrays.
+function emaArr(values: number[], period: number): (number | null)[] {
+  if (!values.length) return [];
+  const k = 2 / (period + 1);
+  const out: (number | null)[] = [null];
+  let prev = values[0];
+  for (let i = 1; i < values.length; i++) {
+    prev = values[i] * k + prev * (1 - k);
+    out.push(i >= period - 1 ? prev : null);
+  }
+  return out;
+}
+function smaArr(values: number[], period: number): (number | null)[] {
+  return values.map((_, i) =>
+    i < period - 1
+      ? null
+      : values.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period,
+  );
+}
+function rsiArr(closes: number[], period = 14): (number | null)[] {
+  const out: (number | null)[] = closes.map(() => null);
+  for (let i = period; i < closes.length; i++) {
+    let g = 0;
+    let l = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const d = closes[j] - closes[j - 1];
+      if (d > 0) g += d;
+      else l -= d;
+    }
+    out[i] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  }
+  return out;
+}
 
 function Chart({
   symbol,
@@ -1135,12 +1299,14 @@ function Chart({
   overlays,
   drawMode,
   onDrawn,
+  indicators = ["vol", "ema"],
 }: {
   symbol: string;
   candles: Candle[];
   overlays?: any;
   drawMode: boolean;
   onDrawn?: () => void;
+  indicators?: string[];
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
@@ -1177,6 +1343,18 @@ function Chart({
         secondsVisible: false,
       },
       autoSize: true,
+      // Zoom: mouse wheel scales, drag pans; pinch on touchpads.
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: false,
+      },
+      handleScale: {
+        mouseWheel: true,
+        pinch: true,
+        axisPressedMouseMove: true,
+      },
     });
     const series = chart.addSeries(CandlestickSeries, {
       upColor: "#168b6a",
@@ -1194,6 +1372,126 @@ function Chart({
         close: c.close,
       })),
     );
+
+    // TradingView-style indicator overlays / panes.
+    const closes = candles.map((c) => c.close);
+    const times = candles.map((c) => Math.floor(c.open_time / 1000));
+    const noDeco = {
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+    };
+    const toLine = (arr: (number | null)[], color: string, pane = 0, w = 1) => {
+      const s = chart.addSeries(
+        LineSeries,
+        { color, lineWidth: w as any, ...noDeco },
+        pane,
+      );
+      s.setData(
+        arr
+          .map((v, i) =>
+            v == null ? null : { time: times[i] as any, value: v },
+          )
+          .filter((x): x is any => x != null),
+      );
+      return s;
+    };
+    let pane = 0;
+    if (indicators.includes("vol")) {
+      pane += 1;
+      const vol = chart.addSeries(
+        HistogramSeries,
+        { priceFormat: { type: "volume" }, ...noDeco },
+        pane,
+      );
+      vol.setData(
+        candles.map((c) => ({
+          time: Math.floor(c.open_time / 1000) as any,
+          value: c.volume,
+          color:
+            c.close >= c.open ? "rgba(22,139,106,0.5)" : "rgba(196,79,94,0.5)",
+        })),
+      );
+      vol.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    }
+    if (indicators.includes("ema")) {
+      toLine(emaArr(closes, 9), "#2563eb", 0, 2);
+      toLine(emaArr(closes, 50), "#f59e0b", 0, 1);
+    }
+    if (indicators.includes("bb")) {
+      const basis = smaArr(closes, 20);
+      const dev = closes.map((_, i) => {
+        if (i < 19) return null;
+        const seg = closes.slice(i - 19, i + 1);
+        const m = seg.reduce((a, b) => a + b, 0) / 20;
+        return Math.sqrt(seg.reduce((a, v) => a + (v - m) ** 2, 0) / 19);
+      });
+      toLine(basis, "#64748b");
+      toLine(
+        basis.map((b, i) =>
+          b == null || dev[i] == null ? null : b + 2 * (dev[i] as number),
+        ),
+        "#94a3b8",
+      );
+      toLine(
+        basis.map((b, i) =>
+          b == null || dev[i] == null ? null : b - 2 * (dev[i] as number),
+        ),
+        "#94a3b8",
+      );
+    }
+    if (indicators.includes("rsi")) {
+      pane += 1;
+      const r = toLine(rsiArr(closes), "#7c3aed", pane, 2);
+      r.createPriceLine({
+        price: 70,
+        color: "#c4b5fd",
+        lineWidth: 1,
+        lineStyle: 2,
+        title: "",
+      });
+      r.createPriceLine({
+        price: 30,
+        color: "#c4b5fd",
+        lineWidth: 1,
+        lineStyle: 2,
+        title: "",
+      });
+    }
+    if (indicators.includes("macd")) {
+      pane += 1;
+      const fast = emaArr(closes, 12);
+      const slow = emaArr(closes, 26);
+      const macd = closes.map((_, i) =>
+        fast[i] == null || slow[i] == null
+          ? null
+          : (fast[i] as number) - (slow[i] as number),
+      );
+      const vals = macd.map((v) => v ?? 0);
+      const signal = emaArr(vals, 9).map((v, i) =>
+        macd[i] == null ? null : v,
+      );
+      toLine(macd, "#2563eb", pane, 2);
+      toLine(signal, "#f59e0b", pane);
+      const hist = chart.addSeries(HistogramSeries, { ...noDeco }, pane);
+      hist.setData(
+        macd
+          .map((v, i) =>
+            v == null || signal[i] == null
+              ? null
+              : {
+                  time: times[i] as any,
+                  value: v - (signal[i] as number),
+                  color:
+                    v >= (signal[i] as number)
+                      ? "rgba(22,139,106,0.5)"
+                      : "rgba(196,79,94,0.5)",
+                },
+          )
+          .filter((x): x is any => x != null),
+      );
+    }
+
     // Saved manual trendlines.
     for (const l of loadLines()) {
       const line = chart.addSeries(LineSeries, {
@@ -1335,7 +1633,18 @@ function Chart({
     });
   }, [candles]);
 
-  return <div ref={ref} className="chart" />;
+  return (
+    <div className="chartWrap">
+      <div ref={ref} className="chart" />
+      <button
+        className="fitButton"
+        title="Reset zoom"
+        onClick={() => chartRef.current?.timeScale().fitContent()}
+      >
+        Fit
+      </button>
+    </div>
+  );
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

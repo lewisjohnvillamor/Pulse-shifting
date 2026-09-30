@@ -334,3 +334,160 @@ class BreakoutStrategy(Strategy):
             execution_confidence,
             reasons,
         )
+
+
+class VwapReversionStrategy(Strategy):
+    id = "vwap_reversion"
+    name = "VWAP Reversion"
+    description = "Long below rolling VWAP, short above — fades intraday deviations scaled by ATR."
+    styles = ["scalping", "day"]
+
+    specs = [
+        ParamSpec("period", "int", 48, 20, 240, 1, "VWAP window (candles)"),
+        ParamSpec("dev_atr", "float", 1.0, 0.3, 3.0, 0.1, "Min deviation (× ATR)"),
+    ]
+
+    def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
+        if len(candles) < self.min_candles:
+            return Decision(
+                "FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 30 candles"]
+            )
+        period = int(self.params["period"])
+        window = candles[-period:]
+        pv = [(float(c["close"]) * float(c["volume"])) for c in window]
+        vols = [float(c["volume"]) for c in window]
+        vwap = sum(pv) / sum(vols) if sum(vols) else 0.0
+        price = float(candles[-1]["close"])
+        atr = atr_pct(candles) * price
+        dev = (price - vwap) / atr if atr > 0 else 0.0
+        stretch = min(abs(dev) / max(self.params["dev_atr"], 0.1), 1.5)
+        execution_confidence = max(0.0, min(1.0, 1 - spread_bps / 12))
+        confidence = max(
+            0.0, min(0.99, 0.45 + 0.35 * stretch + 0.2 * execution_confidence)
+        )
+        reasons = [
+            f"Price {dev:+.2f} ATR from VWAP {vwap:.4g}",
+            f"Spread {spread_bps:.2f} bps",
+        ]
+        if dev <= -self.params["dev_atr"]:
+            action: Action = "LONG"
+        elif dev >= self.params["dev_atr"]:
+            action = "SHORT"
+        else:
+            action = "FLAT"
+        return Decision(
+            action, confidence, "RANGING", 0.7, execution_confidence, reasons
+        )
+
+
+class DonchianTrendStrategy(Strategy):
+    id = "donchian_trend"
+    name = "Donchian Trend"
+    description = "Turtle-style: long on a break of the N-high, short on a break of the N-low, with trend filter."
+    min_candles = 40
+    styles = ["day", "swing"]
+    specs = [
+        ParamSpec("channel", "int", 20, 10, 120, 1, "Donchian length"),
+        ParamSpec("trend_ema", "int", 50, 20, 200, 1, "Trend EMA"),
+    ]
+
+    def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
+        if len(candles) < self.min_candles:
+            return Decision(
+                "FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 40 candles"]
+            )
+        channel = int(self.params["channel"])
+        closes = [float(c["close"]) for c in candles]
+        highs = [float(c["high"]) for c in candles]
+        lows = [float(c["low"]) for c in candles]
+        price = closes[-1]
+        upper = max(highs[-channel - 1 : -1])
+        lower = min(lows[-channel - 1 : -1])
+        trend = ema(closes[-self.params["trend_ema"] :], self.params["trend_ema"])
+        bull_trend = price > trend
+        execution_confidence = max(0.0, min(1.0, 1 - spread_bps / 12))
+        confidence = max(0.0, min(0.99, 0.55 + 0.4 * execution_confidence))
+        reasons = [
+            f"Donchian {lower:.4g}–{upper:.4g}",
+            f"Price {'above' if bull_trend else 'below'} EMA{int(self.params['trend_ema'])}",
+            f"Spread {spread_bps:.2f} bps",
+        ]
+        if price > upper and bull_trend:
+            action: Action = "LONG"
+        elif price < lower and not bull_trend:
+            action = "SHORT"
+        else:
+            action = "FLAT"
+        regime = "TRENDING" if abs(price / trend - 1) > 0.005 else "RANGING"
+        return Decision(action, confidence, regime, 0.6, execution_confidence, reasons)
+
+
+class BbSqueezeStrategy(Strategy):
+    id = "bb_squeeze"
+    name = "Bollinger Squeeze"
+    description = "Trades the expansion after a band squeeze: direction of the break out of the tight band."
+    min_candles = 40
+    styles = ["scalping", "day"]
+    specs = [
+        ParamSpec("period", "int", 20, 10, 60, 1, "Band period"),
+        ParamSpec("width", "float", 2.0, 1.0, 3.5, 0.1, "Band width (σ)"),
+        ParamSpec("squeeze_pct", "float", 0.35, 0.1, 0.9, 0.05, "Squeeze percentile"),
+    ]
+
+    def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
+        if len(candles) < self.min_candles:
+            return Decision(
+                "FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need at least 40 candles"]
+            )
+        period = int(self.params["period"])
+        closes = [float(c["close"]) for c in candles]
+        widths = []
+        for i in range(len(candles) - period * 2, len(candles)):
+            seg = closes[max(0, i - period) : i]
+            if len(seg) < 5:
+                continue
+            m = mean(seg)
+            if m:
+                widths.append(self.params["width"] * stdev(seg) / m * 2)
+        if len(widths) < period:
+            return Decision(
+                "FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Need more candles for squeeze"]
+            )
+        cutoff = sorted(widths)[int(len(widths) * self.params["squeeze_pct"])]
+        now = widths[-1]
+        squeezed = now <= cutoff
+        basis = mean(closes[-period:])
+        dev = stdev(closes[-period:])
+        upper, lower = (
+            basis + self.params["width"] * dev,
+            basis - self.params["width"] * dev,
+        )
+        price = closes[-1]
+        momentum = (price / closes[-5] - 1) if len(closes) > 5 else 0.0
+        execution_confidence = max(0.0, min(1.0, 1 - spread_bps / 12))
+        squeeze_strength = min(1.0 - now / (cutoff or 1), 1.0) if squeezed else 0.0
+        confidence = max(
+            0.0,
+            min(
+                0.99, 0.45 + 0.3 * squeeze_strength + 0.2 * min(abs(momentum) * 400, 1)
+            ),
+        )
+        reasons = [
+            f"Band width {now * 100:.2f}% (squeeze cutoff {cutoff * 100:.2f}%)",
+            f"5-candle momentum {momentum * 100:+.2f}%",
+            f"Spread {spread_bps:.2f} bps",
+        ]
+        if squeezed and price > upper:
+            action: Action = "LONG"
+        elif squeezed and price < lower:
+            action = "SHORT"
+        else:
+            action = "FLAT"
+        return Decision(
+            action,
+            confidence,
+            "SQUEEZE" if squeezed else "EXPANDING",
+            0.65,
+            execution_confidence,
+            reasons,
+        )

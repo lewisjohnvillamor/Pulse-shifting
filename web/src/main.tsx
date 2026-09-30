@@ -125,6 +125,9 @@ function App() {
   const [data, setData] = useState<MarketData | null>(null);
   const [error, setError] = useState("");
   const [bt, setBt] = useState<any>(null);
+  const [evolution, setEvolution] = useState<any>(null);
+  const [evolving, setEvolving] = useState(false);
+  const [evoError, setEvoError] = useState("");
   const [amount, setAmount] = useState(250);
   const [layout, setLayout] = useState<Layout[]>(loadLayout);
   const [query, setQuery] = useState("");
@@ -400,6 +403,57 @@ function App() {
     if (btEnd) url += `&end_ms=${new Date(btEnd).getTime()}`;
     const r = await fetch(url);
     setBt(await r.json());
+  };
+
+  const runEvolutionSearch = async () => {
+    if (!active || active === "MULTI") return;
+    setEvolving(true);
+    setEvoError("");
+    setEvolution(null);
+    try {
+      const r = await fetch(API + "/api/evolution/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: active,
+          interval: btInterval,
+          limit: 1000,
+          strategy_id: btStrategy,
+          generations: 4,
+          population: 16,
+          elite_fraction: 0.2,
+          mutation_rate: 0.35,
+          mutation_scale: 0.1,
+          seed: 42,
+        }),
+      });
+      const payload = await r.json();
+      if (!r.ok) throw new Error(payload.detail || "Evolution failed");
+      setEvolution(payload);
+    } catch (e: any) {
+      setEvoError(e.message || "Evolution failed");
+    } finally {
+      setEvolving(false);
+    }
+  };
+
+  const promoteChampion = async () => {
+    if (!evolution?.champion?.params) return;
+    const r = await fetch(
+      `${API}/api/evolution/promote/${evolution.strategy_id}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ params: evolution.champion.params }),
+      },
+    );
+    if (!r.ok) {
+      const payload = await r.json();
+      setEvoError(payload.detail || "Could not promote champion");
+      return;
+    }
+    await refreshStrategies();
+    refresh(active);
   };
 
   return (
@@ -1102,6 +1156,15 @@ function App() {
                   <button className="runButton" onClick={runBt}>
                     <Play size={14} /> Run
                   </button>
+                  <button
+                    className="discoverButton"
+                    onClick={runEvolutionSearch}
+                    disabled={evolving}
+                    title="Mutate this strategy and compare train / validation / holdout performance"
+                  >
+                    <FlaskConical size={14} />
+                    {evolving ? "Evolving…" : "Discover"}
+                  </button>
                 </div>
               </div>
               <div className="arenaRange">
@@ -1157,6 +1220,71 @@ function App() {
                 <div className="arenaEmpty">
                   <FlaskConical size={20} />
                   <span>No experiment results yet</span>
+                </div>
+              )}
+
+              {evoError && <div className="inlineError evolutionError">{evoError}</div>}
+
+              {evolution && (
+                <div className="evolutionPanel">
+                  <div className="evolutionHead">
+                    <div>
+                      <span className="kicker">Evolution result</span>
+                      <h3>{evolution.strategy_name}</h3>
+                    </div>
+                    <button className="promoteButton" onClick={promoteChampion}>
+                      Promote champion
+                    </button>
+                  </div>
+
+                  <div className="evolutionSummary">
+                    <Stat
+                      label="Validation return"
+                      value={pct(evolution.champion.validation.return_pct)}
+                    />
+                    <Stat
+                      label="Holdout return"
+                      value={pct(evolution.champion.test.return_pct)}
+                    />
+                    <Stat
+                      label="Holdout drawdown"
+                      value={pct(evolution.champion.test.max_drawdown_pct)}
+                    />
+                    <Stat
+                      label="Holdout PF"
+                      value={String(evolution.champion.test.profit_factor ?? "—")}
+                    />
+                    <Stat
+                      label="Fitness"
+                      value={Number(evolution.champion.fitness).toFixed(3)}
+                    />
+                  </div>
+
+                  <div className="generationStrip">
+                    {evolution.history.map((g: any) => (
+                      <div key={g.generation} className="generationCell">
+                        <span>G{g.generation + 1}</span>
+                        <strong>{Number(g.best_fitness).toFixed(2)}</strong>
+                        <small>{pct(g.best_validation_return_pct)}</small>
+                      </div>
+                    ))}
+                  </div>
+
+                  <details className="genomeDetails">
+                    <summary>Champion genome</summary>
+                    <div className="genomeGrid">
+                      {Object.entries(evolution.champion.params).map(
+                        ([key, value]: [string, any]) => (
+                          <div key={key}>
+                            <span>{key}</span>
+                            <strong>{Number(value).toFixed(4)}</strong>
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  </details>
+
+                  <p className="evolutionNote">{evolution.note}</p>
                 </div>
               )}
             </section>

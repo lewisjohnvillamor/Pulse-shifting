@@ -29,7 +29,10 @@ PulseShift now uses a **Python/FastAPI quant engine** with a **React + TypeScrip
 - Strategy style tags (scalping / day / swing) with a filter on the board
 - Opt-in signal monitor per symbol: logs every live entry/exit call to `data/monitor/<symbol>.jsonl`
 - Historical backtest arena: any strategy, interval (1m–1d), and past date window
-- `strategies/laya.py`: adapter that delegates decisions to a local Laya endpoint (`LAYA_URL`)
+- `strategies/laya.py` + `strategies/jev.py`: adapters that delegate decisions to a local model or a configured AI endpoint
+- Settings gear (BYO key): provider endpoints + API keys saved to `data/config.json` (gitignored), masked in the UI
+- Auto pattern drawing: heuristic detection (S/R levels, triangles, double top/bottom, head & shoulders, flags) drawn on live + backtest charts with projected entry/stop/target
+- Manual trendlines: two-click draw on the chart, saved per symbol
 - Execution ledger
 - Quick 500 × 5-minute backtest
 - Return, win rate, max drawdown, and profit factor

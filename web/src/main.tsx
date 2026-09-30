@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { createChart, CandlestickSeries } from "lightweight-charts";
+import {
+  createChart,
+  createSeriesMarkers,
+  CandlestickSeries,
+  LineSeries,
+} from "lightweight-charts";
 import GridLayout, { Layout, WidthProvider } from "react-grid-layout";
 import {
   Activity,
@@ -13,6 +18,8 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Settings,
+  PenLine,
   WalletCards,
   X,
 } from "lucide-react";
@@ -44,6 +51,7 @@ type MarketData = {
   stream_connected?: boolean;
   stream_last_event_ms?: number;
   monitoring?: boolean;
+  patterns?: any;
 };
 type PinEntry = { symbol: string; market: any; stream_connected: boolean };
 type SymbolResult = {
@@ -120,6 +128,41 @@ function App() {
   const [btInterval, setBtInterval] = useState("5m");
   const [btStart, setBtStart] = useState("");
   const [btEnd, setBtEnd] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [providers, setProviders] = useState<any>({});
+  const [providerName, setProviderName] = useState("jev");
+  const [providerUrl, setProviderUrl] = useState("");
+  const [providerKey, setProviderKey] = useState("");
+  const [drawMode, setDrawMode] = useState(false);
+  const [drawVersion, setDrawVersion] = useState(0);
+
+  const loadConfig = useCallback(async () => {
+    try {
+      const r = await fetch(API + "/api/config");
+      if (r.ok) setProviders((await r.json()).providers);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  const saveProvider = async () => {
+    const r = await fetch(`${API}/api/config/${providerName}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: providerUrl || null,
+        api_key: providerKey || null,
+      }),
+    });
+    if (r.ok) {
+      setProviderKey("");
+      loadConfig();
+      fetch(API + "/api/strategies/reload", { method: "POST" });
+    }
+  };
 
   const refreshStrategies = useCallback(async () => {
     try {
@@ -390,8 +433,76 @@ function App() {
           {data?.stream_connected === false
             ? "Reconnecting"
             : "Live Binance stream"}
+          <button
+            className="gearButton"
+            title="Provider settings"
+            onClick={() => setSettingsOpen((v) => !v)}
+          >
+            <Settings size={15} />
+          </button>
         </div>
       </header>
+
+      {settingsOpen && (
+        <div className="settings panel">
+          <div className="panelHeader compact">
+            <div>
+              <span className="kicker">BYO key</span>
+              <h2>AI providers</h2>
+            </div>
+          </div>
+          <div className="settingsBody">
+            <label>
+              Provider
+              <input
+                value={providerName}
+                onChange={(e) => setProviderName(e.target.value)}
+                placeholder="jev"
+              />
+            </label>
+            <label>
+              Endpoint URL
+              <input
+                value={providerUrl}
+                onChange={(e) => setProviderUrl(e.target.value)}
+                placeholder="https://…/decide or http://127.0.0.1:8790/decide"
+              />
+            </label>
+            <label>
+              API key
+              <input
+                type="password"
+                value={providerKey}
+                onChange={(e) => setProviderKey(e.target.value)}
+                placeholder={
+                  providers[providerName]?.api_key_set
+                    ? "saved (leave blank to keep)"
+                    : "paste key"
+                }
+              />
+            </label>
+            <button className="runButton" onClick={saveProvider}>
+              Save
+            </button>
+          </div>
+          <div className="providerList">
+            {Object.entries(providers).map(([name, p]: [string, any]) => (
+              <div key={name} className="providerRow">
+                <strong>{name}</strong>
+                <span>{p.url || "no endpoint"}</span>
+                <em>{p.api_key_set ? "key saved" : "no key"}</em>
+              </div>
+            ))}
+            {!Object.keys(providers).length && (
+              <em>No providers configured yet.</em>
+            )}
+          </div>
+          <small className="edgeNote">
+            Stored locally in data/config.json (gitignored). Strategies named
+            after a provider (e.g. jev, laya) use it automatically.
+          </small>
+        </div>
+      )}
 
       {pickerOpen && (
         <div className="picker panel">
@@ -475,13 +586,31 @@ function App() {
                   <h2>{active}</h2>
                 </div>
                 <div className="intervals">
-                  <button className="active">1m</button>
-                  <button disabled>5m</button>
-                  <button disabled>15m</button>
-                  <button disabled>1h</button>
+                  <button
+                    className={drawMode ? "active" : ""}
+                    onClick={() => setDrawMode((v) => !v)}
+                    title="Draw a trendline (click two points)"
+                  >
+                    <PenLine size={13} /> Draw
+                  </button>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem(`pulseshift-lines-${active}`);
+                      setDrawVersion((v) => v + 1);
+                    }}
+                  >
+                    Clear
+                  </button>
                 </div>
               </div>
-              <Chart key={active} candles={data.candles} />
+              <Chart
+                key={`${active}-${drawVersion}`}
+                symbol={active}
+                candles={data.candles}
+                overlays={data.patterns}
+                drawMode={drawMode}
+                onDrawn={() => setDrawMode(false)}
+              />
               <div className="chartFooter">
                 <span>{data.candles.length} candles</span>
                 <span>Streaming live</span>
@@ -942,13 +1071,30 @@ function App() {
                   ` Window: ${new Date(bt.window.start_ms).toLocaleDateString()} – ${new Date(bt.window.end_ms).toLocaleDateString()}, ${bt.window.candles} candles.`}
               </p>
               {bt ? (
-                <div className="arenaStats">
-                  <Stat label="Return" value={pct(bt.return_pct)} />
-                  <Stat label="Round trips" value={String(bt.round_trips)} />
-                  <Stat label="Win rate" value={pct(bt.win_rate_pct)} />
-                  <Stat label="Max drawdown" value={pct(bt.max_drawdown_pct)} />
-                  <Stat label="Profit factor" value={bt.profit_factor ?? "—"} />
-                </div>
+                <>
+                  {bt.candles?.length > 0 && (
+                    <Chart
+                      key={`bt-${bt.strategy_id}-${bt.window?.start_ms}`}
+                      symbol={active}
+                      candles={bt.candles}
+                      overlays={bt.patterns}
+                      drawMode={false}
+                    />
+                  )}
+                  <div className="arenaStats">
+                    <Stat label="Return" value={pct(bt.return_pct)} />
+                    <Stat label="Round trips" value={String(bt.round_trips)} />
+                    <Stat label="Win rate" value={pct(bt.win_rate_pct)} />
+                    <Stat
+                      label="Max drawdown"
+                      value={pct(bt.max_drawdown_pct)}
+                    />
+                    <Stat
+                      label="Profit factor"
+                      value={bt.profit_factor ?? "—"}
+                    />
+                  </div>
+                </>
               ) : (
                 <div className="arenaEmpty">
                   <FlaskConical size={20} />
@@ -963,10 +1109,37 @@ function App() {
   );
 }
 
-function Chart({ candles }: { candles: Candle[] }) {
+type TrendLine = { t1: number; p1: number; t2: number; p2: number };
+const _tsOf = (c: Candle) => Math.floor(c.open_time / 1000);
+
+function Chart({
+  symbol,
+  candles,
+  overlays,
+  drawMode,
+  onDrawn,
+}: {
+  symbol: string;
+  candles: Candle[];
+  overlays?: any;
+  drawMode: boolean;
+  onDrawn?: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const seriesRef = useRef<any>(null);
+  const pendingRef = useRef<TrendLine | null>(null);
+  const drawModeRef = useRef(drawMode);
+  drawModeRef.current = drawMode;
+
+  const storageKey = `pulseshift-lines-${symbol}`;
+  const loadLines = (): TrendLine[] => {
+    try {
+      return JSON.parse(localStorage.getItem(storageKey) || "[]");
+    } catch {
+      return [];
+    }
+  };
 
   useEffect(() => {
     if (!ref.current || !candles.length) return;
@@ -1004,6 +1177,125 @@ function Chart({ candles }: { candles: Candle[] }) {
         close: c.close,
       })),
     );
+    // Saved manual trendlines.
+    for (const l of loadLines()) {
+      const line = chart.addSeries(LineSeries, {
+        color: "#7c3aed",
+        lineWidth: 2,
+      });
+      line.setData([
+        { time: l.t1 as any, value: l.p1 },
+        { time: l.t2 as any, value: l.p2 },
+      ]);
+    }
+
+    // Pattern overlays: polylines, S/R levels, entry/stop/target markers.
+    const markers: any[] = [];
+    const addOverlayLine = (
+      pts: [number, number][],
+      color: string,
+      style = 0,
+    ) => {
+      if (!pts?.length) return;
+      const line = chart.addSeries(LineSeries, {
+        color,
+        lineWidth: 1,
+        lineStyle: style,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      line.setData(pts.map(([t, p]) => ({ time: t as any, value: p })));
+    };
+    for (const lv of overlays?.levels || []) {
+      addOverlayLine(
+        [
+          [lv.t0, lv.price],
+          [lv.t1, lv.price],
+        ],
+        lv.kind === "support" ? "#168b6a" : "#c44f5e",
+        2,
+      );
+    }
+    for (const pat of overlays?.patterns || []) {
+      const color =
+        pat.bias === "bullish"
+          ? "#168b6a"
+          : pat.bias === "bearish"
+            ? "#c44f5e"
+            : "#64748b";
+      const pts = pat.points || [];
+      for (let i = 0; i + 1 < pts.length; i += 2)
+        addOverlayLine([pts[i], pts[i + 1]], color);
+      const last = candles[candles.length - 1];
+      const t = Math.floor(last.open_time / 1000);
+      markers.push(
+        {
+          time: t as any,
+          position: "aboveBar",
+          color,
+          shape: "circle",
+          text: `${pat.name} ${Math.round(pat.confidence * 100)}%`,
+        },
+        {
+          time: t as any,
+          position: "aboveBar",
+          color: "#2563eb",
+          shape: "arrowUp",
+          text: `ENTRY ${pat.entry}`,
+        },
+        {
+          time: t as any,
+          position: "belowBar",
+          color: "#c44f5e",
+          shape: "arrowDown",
+          text: `STOP ${pat.stop}`,
+        },
+        {
+          time: t as any,
+          position: "aboveBar",
+          color: "#168b6a",
+          shape: "arrowUp",
+          text: `TARGET ${pat.target}`,
+        },
+      );
+      addOverlayLine(
+        [
+          [_tsOf(candles[0]), pat.entry],
+          [_tsOf(last), pat.entry],
+        ],
+        "#2563eb",
+        1,
+      );
+    }
+    if (markers.length) createSeriesMarkers(series, markers);
+
+    // Two-click trendline drawing.
+    chart.subscribeClick((param: any) => {
+      if (!drawModeRef.current || !param.point) return;
+      const time = param.time as number;
+      const price = series.coordinateToPrice(param.point.y);
+      if (time == null || price == null) return;
+      if (!pendingRef.current) {
+        pendingRef.current = { t1: time, p1: price, t2: time, p2: price };
+        return;
+      }
+      const first = pendingRef.current;
+      pendingRef.current = null;
+      const line = { ...first, t2: time, p2: price };
+      const all = [...loadLines(), line];
+      localStorage.setItem(storageKey, JSON.stringify(all));
+      const ls = chart.addSeries(LineSeries, {
+        color: "#7c3aed",
+        lineWidth: 2,
+      });
+      ls.setData([
+        { time: line.t1 as any, value: line.p1 },
+        { time: line.t2 as any, value: line.p2 },
+      ]);
+      onDrawn?.();
+    });
+
     chart.timeScale().fitContent();
     chartRef.current = chart;
     seriesRef.current = series;

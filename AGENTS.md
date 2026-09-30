@@ -59,6 +59,10 @@ cd web && npm run build                # tsc -b && vite build
 - `app/monitor.py` (SignalMonitor) logs opt-in per-symbol signal events to
   `data/monitor/<symbol>.jsonl`.
 - Strategies declare `styles` ("scalping" | "day" | "swing") for the UI filter.
+- AI-provider endpoints/keys live in `data/config.json` (AppConfig,
+  gitignored, masked via `/api/config`); `app/ai.py` AiProviderClient calls
+  them. `app/patterns.py` emits chart overlay geometry consumed by the
+  Chart component.
 - The UI dashboard is a `react-grid-layout` grid; panel layout, pinned
   symbols, and the active tab persist in `localStorage`.
 - Don't commit `data/`, `.venv/`, `node_modules/`, or anything containing

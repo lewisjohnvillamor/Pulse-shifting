@@ -44,18 +44,25 @@ class AiRegimeFusionStrategy(Strategy):
         ParamSpec("hv_momentum", "float", 0.23, 0.0, 0.7, 0.01, "High vol · momentum weight"),
         ParamSpec("hv_reversion", "float", 0.15, 0.0, 0.7, 0.01, "High vol · reversion weight"),
         ParamSpec("hv_breakout", "float", 0.40, 0.05, 0.9, 0.01, "High vol · breakout weight"),
+        # Hysteresis: once long, hold until the score falls below this level
+        # instead of exiting the moment it dips under the entry threshold.
+        ParamSpec("exit_threshold", "float", 0.0, -0.6, 0.4, 0.01, "Exit score (hold above)"),
+        # Cost filter: only enter when ATR over the expected holding horizon
+        # covers `min_edge_multiple` round trips of fees + spread.
+        ParamSpec("fee_bps", "float", 10.0, 0.0, 50.0, 0.5, "Taker fee per side (bps)"),
+        ParamSpec("edge_horizon", "int", 12, 1, 60, 1, "Expected hold (candles)"),
+        ParamSpec("min_edge_multiple", "float", 1.5, 0.0, 6.0, 0.1, "Min move / round-trip cost"),
+        # Backtests showed SHORT calls were anti-predictive (dips tended to
+        # bounce), so shorts are opt-in.
+        ParamSpec("allow_short", "int", 0, 0, 1, 1, "Allow SHORT signals (0/1)"),
     ]
 
     @staticmethod
     def _clamp(value: float, lo: float = -1.0, hi: float = 1.0) -> float:
         return max(lo, min(hi, value))
 
-    def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
-        if len(candles) < self.min_candles:
-            return Decision(
-                "FLAT", 0.0, "UNKNOWN", 0.0, 0.0,
-                [f"Need at least {self.min_candles} candles"],
-            )
+    def _evaluate(self, candles: list[dict], spread_bps: float) -> dict:
+        """Compute the fusion score and its ingredients for the last candle."""
 
         closes = [float(c["close"]) for c in candles]
         highs = [float(c["high"]) for c in candles]
@@ -65,8 +72,11 @@ class AiRegimeFusionStrategy(Strategy):
 
         fast_n = int(self.params["trend_fast"])
         slow_n = int(self.params["trend_slow"])
-        fast = ema(closes[-max(slow_n, fast_n):], fast_n)
-        slow = ema(closes[-slow_n:], slow_n)
+        # Seed both EMAs over the same, longer history so the slow one is
+        # warmed up rather than anchored to its first sample.
+        ema_window = closes[-min(len(closes), 3 * max(slow_n, fast_n)):]
+        fast = ema(ema_window, fast_n)
+        slow = ema(ema_window, slow_n)
 
         # 1) Trend: normalized EMA separation.
         trend_score = self._clamp((fast / slow - 1) * 240 if slow else 0.0)
@@ -164,12 +174,69 @@ class AiRegimeFusionStrategy(Strategy):
         score = raw_score * (0.75 + 0.25 * volume_quality)
         score *= 0.65 + 0.35 * execution_confidence
 
+        # Cost filter: expected move over the holding horizon vs round trip.
+        atrp = atr_abs / price if price else 0.0
+        expected_move_bps = atrp * self.params["edge_horizon"] ** 0.5 * 10_000
+        round_trip_bps = 2 * self.params["fee_bps"] + spread_bps
+        edge_multiple = (
+            expected_move_bps / round_trip_bps if round_trip_bps else float("inf")
+        )
+
+        return {
+            "score": score,
+            "consensus": consensus,
+            "regime": regime,
+            "trend_score": trend_score,
+            "momentum_score": momentum_score,
+            "reversion_score": reversion_score,
+            "breakout_score": breakout_score,
+            "volume_ratio": volume_ratio,
+            "rsi": rsi_value,
+            "trend_strength": trend_strength,
+            "realized_vol": realized_vol,
+            "execution_confidence": execution_confidence,
+            "edge_multiple": edge_multiple,
+        }
+
+    def _warming_up(self, candles: list[dict]) -> bool:
+        return len(candles) < self.min_candles
+
+    def should_exit(
+        self, candles: list[dict], spread_bps: float = 0.0, side: Action = "LONG"
+    ) -> bool:
+        if self._warming_up(candles):
+            return False
+        score = self._evaluate(candles, spread_bps)["score"]
+        exit_level = self.params["exit_threshold"]
+        if side == "LONG":
+            return score < exit_level
+        return score > -exit_level
+
+    def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
+        if self._warming_up(candles):
+            return Decision(
+                "FLAT", 0.0, "UNKNOWN", 0.0, 0.0,
+                [f"Need at least {self.min_candles} candles"],
+            )
+
+        f = self._evaluate(candles, spread_bps)
+        score = f["score"]
+        consensus = f["consensus"]
+        execution_confidence = f["execution_confidence"]
         threshold = self.params["entry_threshold"]
         min_consensus = self.params["min_consensus"]
+        exit_level = self.params["exit_threshold"]
+        edge_ok = f["edge_multiple"] >= self.params["min_edge_multiple"]
+        shorts_on = self.params["allow_short"] >= 0.5
 
-        if score >= threshold and consensus >= min_consensus:
+        if score >= threshold and consensus >= min_consensus and edge_ok:
             action: Action = "LONG"
-        elif score <= -threshold and consensus >= min_consensus:
+        elif (
+            shorts_on
+            and score <= -threshold
+            and consensus >= min_consensus
+            and edge_ok
+        ):
             action = "SHORT"
         else:
             action = "FLAT"
@@ -186,26 +253,35 @@ class AiRegimeFusionStrategy(Strategy):
         )
         regime_confidence = min(
             0.95,
-            0.55 + 0.25 * trend_strength + 0.15 * min(realized_vol / 0.01, 1.0),
+            0.55
+            + 0.25 * f["trend_strength"]
+            + 0.15 * min(f["realized_vol"] / 0.01, 1.0),
         )
 
         reasons = [
-            f"Fusion score {score:+.3f} (entry ±{threshold:.2f})",
+            f"Fusion score {score:+.3f} (entry ±{threshold:.2f}, hold long above {exit_level:+.2f})",
             f"Consensus {consensus * 100:.0f}%",
-            f"Trend {trend_score:+.2f} · momentum {momentum_score:+.2f}",
-            f"Reversion {reversion_score:+.2f} · breakout {breakout_score:+.2f}",
-            f"Volume {volume_ratio:.2f}x · RSI {rsi_value:.1f}",
-            f"Regime {regime} · spread {spread_bps:.2f} bps",
+            f"Trend {f['trend_score']:+.2f} · momentum {f['momentum_score']:+.2f}",
+            f"Reversion {f['reversion_score']:+.2f} · breakout {f['breakout_score']:+.2f}",
+            f"Volume {f['volume_ratio']:.2f}x · RSI {f['rsi']:.1f}",
+            (
+                f"Expected move {f['edge_multiple']:.1f}x round-trip cost"
+                f" (need {self.params['min_edge_multiple']:.1f}x)"
+            ),
+            f"Regime {f['regime']} · spread {spread_bps:.2f} bps",
         ]
+        if action == "FLAT" and not edge_ok and abs(score) >= threshold:
+            reasons.append("Signal present but too small to beat fees — abstaining")
+        if action == "FLAT" and not shorts_on and score <= -threshold:
+            reasons.append("Bearish score, but shorts are disabled (allow_short=0)")
 
         return Decision(
             action,
             confidence,
-            regime,
+            f["regime"],
             regime_confidence,
             execution_confidence,
             reasons,
         )
-
 
 STRATEGY = AiRegimeFusionStrategy()

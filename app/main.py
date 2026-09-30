@@ -15,6 +15,8 @@ from .live_market import MarketHub, SymbolFeed
 from .market import BinancePublicClient, MarketSnapshot, normalize_symbol
 from .monitor import SignalMonitor
 from .paper import PaperBroker
+from .patterns import detect_patterns
+from .config import AppConfig
 from .registry import StrategyRegistry
 from .signals import edge_assessment
 from .watchlist import Watchlist
@@ -26,6 +28,7 @@ broker = PaperBroker()
 hub = MarketHub(market)
 watchlist = Watchlist(DATA_DIR / "watchlist.json")
 monitor = SignalMonitor(DATA_DIR / "monitor")
+config = AppConfig(DATA_DIR / "config.json")
 registry = StrategyRegistry(
     plugin_dir=BASE_DIR.parent / "strategies",
     params_file=DATA_DIR / "strategy_params.json",
@@ -67,6 +70,12 @@ class ParamsIn(BaseModel):
 
 class MonitorIn(BaseModel):
     enabled: bool
+
+
+class ProviderIn(BaseModel):
+    url: str | None = None
+    api_key: str | None = None
+    timeout_ms: int | None = None
 
 
 def _clean_symbol(symbol: str) -> str:
@@ -136,6 +145,7 @@ def _market_payload(feed: SymbolFeed, snapshot: MarketSnapshot) -> dict:
         "stream_connected": feed.connected,
         "stream_last_event_ms": feed.last_event_ms,
         "monitoring": monitor.is_enabled(snapshot.symbol),
+        "patterns": detect_patterns(candles),
     }
     monitor.record(snapshot.symbol, payload)
     return payload
@@ -245,6 +255,29 @@ async def reload_strategies():
     return {"strategies": [s["id"] for s in registry.describe()]}
 
 
+@app.get("/api/config")
+async def get_config():
+    return config.as_public_dict()
+
+
+@app.put("/api/config/{provider}")
+async def set_provider(provider: str, body: ProviderIn):
+    name = provider.strip().lower()
+    if not name or len(name) > 40:
+        raise HTTPException(status_code=400, detail="Invalid provider name")
+    merged = config.set_provider(
+        name,
+        {
+            "url": body.url,
+            "api_key": body.api_key,
+            "timeout_ms": body.timeout_ms,
+        },
+    )
+    registry.reload()
+    safe = config.as_public_dict()["providers"].get(name, {})
+    return {"provider": name, "config": safe, "stored_keys": list(merged)}
+
+
 @app.post("/api/monitor/{symbol}")
 async def set_monitor(symbol: str, body: MonitorIn):
     symbol = _clean_symbol(symbol)
@@ -266,6 +299,18 @@ async def get_monitor(symbol: str, limit: int = Query(default=50, le=200)):
         "enabled": monitor.is_enabled(symbol),
         "events": monitor.recent(symbol, limit),
     }
+
+
+@app.get("/api/patterns")
+async def patterns(symbol: str = "BTCUSDT", lookback: int = Query(default=120, le=500)):
+    symbol = _clean_symbol(symbol)
+    feed = hub.feed(symbol)
+    candles = (
+        feed.candles
+        if feed and feed.candles
+        else await market.klines(symbol, limit=min(lookback, 500))
+    )
+    return {"symbol": symbol, **detect_patterns(candles, lookback)}
 
 
 @app.get("/api/monitor")
@@ -381,6 +426,8 @@ async def backtest(
         result = run_backtest(candles, strategy=instance)
         result["symbol"] = symbol
         result["interval"] = interval
+        result["patterns"] = detect_patterns(candles)
+        result["candles"] = candles[-500:]
         result["strategy_id"] = strategy or "ema_momentum"
         result["window"] = {
             "start_ms": candles[0]["open_time"],

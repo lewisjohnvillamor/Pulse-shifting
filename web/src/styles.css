@@ -1478,3 +1478,41 @@ td {
   padding: 2px 4px;
   margin-left: 4px;
 }
+
+/* Forward test panel */
+.forwardPanel {
+  overflow: auto;
+}
+.fwdStatus {
+  font-size: 11px;
+  font-weight: 650;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #eef2f7;
+  color: #475569;
+}
+.fwdStatus.on_track {
+  background: #dcfce7;
+  color: #166534;
+}
+.fwdStatus.edge_gone {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.fwdSpark {
+  width: 100%;
+  height: 48px;
+  margin: 6px 0;
+}
+.fwdSpark path {
+  fill: none;
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+.fwdSpark .strat {
+  stroke: #2563eb;
+}
+.fwdSpark .bench {
+  stroke: #9ca3af;
+  stroke-dasharray: 3 2;
+}

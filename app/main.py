@@ -36,10 +36,25 @@ registry = StrategyRegistry(
 )
 
 
+async def _forward_recorder() -> None:
+    """Record the forward test once per closed daily candle (checked hourly;
+    recording is idempotent per date)."""
+    from . import forward
+
+    while True:
+        try:
+            await forward.record_now(market, registry, watchlist.symbols)
+        except Exception:
+            pass  # network hiccup: try again next hour
+        await asyncio.sleep(3600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await asyncio.gather(*(hub.subscribe(symbol) for symbol in watchlist.symbols))
+    recorder = asyncio.create_task(_forward_recorder())
     yield
+    recorder.cancel()
     await hub.stop_all()
     await market.close()
 
@@ -472,6 +487,34 @@ def _plan_for(strategy, candles: list[dict]) -> dict | None:
         return strategy.decide(candles, 1.0).as_dict().get("levels")
     except Exception:
         return None
+
+
+_FORWARD_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+@app.get("/api/forward")
+async def forward_report():
+    """Live (forward) paper results of the trend portfolio and the AI model's
+    daily signals vs. what the out-of-sample backtests predicted."""
+    import time
+
+    from . import forward
+
+    hit = _FORWARD_CACHE.get("report")
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    result = await forward.report_now(market)
+    _FORWARD_CACHE["report"] = (time.time(), result)
+    return result
+
+
+@app.post("/api/forward/record")
+async def forward_record():
+    from . import forward
+
+    result = await forward.record_now(market, registry, watchlist.symbols)
+    _FORWARD_CACHE.clear()
+    return result
 
 
 _TREND_CACHE: dict[str, tuple[float, dict]] = {}

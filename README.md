@@ -247,3 +247,27 @@ The AI model (`ai_regime_fusion`) and Trend do different jobs. On unseen
 daily data the AI model earned more (+94% avg, −53% avg max DD, 6 symbols).
 Trend earned less with far smaller drawdowns (+32%, −21%, profitable 6/6).
 Gating the AI model with trend did not improve it.
+
+## Forward test (live paper tracking)
+
+Backtests can be overfit by accident; a forward test cannot. While the API
+runs, it records once per closed daily candle (checked hourly, idempotent):
+
+- the **Trend portfolio**'s target weights and closes;
+- the **AI model**'s daily signal for BTC, ETH, SOL, BNB, XRP and ADA.
+
+Records go to `data/forward/` (gitignored). Nothing is backfilled, so the
+log only holds genuinely out-of-sample decisions. The **Forward test** panel
+(and `GET /api/forward`) scores the records with the backtest's accounting
+(held close to close, 12 bps per unit of turnover). It shows live results
+against the expectations from the out-of-sample backtest: Sharpe 1.17,
+max DD −24%, ~25%/yr, and AI daily IC +0.093.
+
+**Stop rule, fixed in advance.** After 180 days, a live Sharpe below 0.3
+means the edge is treated as gone. So does a drawdown beyond −35% at any
+time.
+
+```bash
+python -m app.forward record   # record now (e.g. from cron if the API isn't running)
+python -m app.forward report   # live vs expected summary
+```

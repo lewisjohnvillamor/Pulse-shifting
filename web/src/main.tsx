@@ -120,6 +120,7 @@ const DEFAULT_LAYOUT: Layout[] = [
   { i: "monitor", x: 8, y: 25, w: 4, h: 4, minW: 3, minH: 3 },
   { i: "arena", x: 0, y: 19, w: 8, h: 7, minW: 3, minH: 3 },
   { i: "trend", x: 0, y: 26, w: 8, h: 8, minW: 4, minH: 4 },
+  { i: "forward", x: 8, y: 29, w: 4, h: 8, minW: 3, minH: 5 },
 ];
 
 function loadLayout(): Layout[] {
@@ -196,6 +197,7 @@ function App() {
     }
   });
   const [trendPf, setTrendPf] = useState<any>(null);
+  const [fwd, setFwd] = useState<any>(null);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -483,6 +485,21 @@ function App() {
     };
     load();
     const id = setInterval(load, 900000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Forward (live paper) test; the API records once per closed daily candle.
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const r = await fetch(`${API}/api/forward`);
+        if (r.ok) setFwd(await r.json());
+      } catch {
+        /* ignore */
+      }
+    };
+    load();
+    const id = setInterval(load, 600000);
     return () => clearInterval(id);
   }, []);
 
@@ -1097,6 +1114,10 @@ function App() {
               ) : (
                 <em>Off — enable to log live entry/exit calls.</em>
               )}
+            </section>
+
+            <section key="forward" className="panel forwardPanel">
+              <ForwardPanel fwd={fwd} />
             </section>
 
             <section key="trend" className="panel trendPanel">
@@ -2062,6 +2083,112 @@ function Chart({
         Fit
       </button>
     </div>
+  );
+}
+
+function Sparkline({ points }: { points: any[] }) {
+  if (points.length < 2) return null;
+  const vals = points.flatMap((p) => [p.strategy, p.equal_weight]);
+  const lo = Math.min(...vals);
+  const hi = Math.max(...vals);
+  const span = hi - lo || 1;
+  const path = (key: string) =>
+    points
+      .map((p, i) => {
+        const x = (i / (points.length - 1)) * 100;
+        const y = 36 - ((p[key] - lo) / span) * 32;
+        return `${i ? "L" : "M"}${x.toFixed(2)},${y.toFixed(2)}`;
+      })
+      .join(" ");
+  return (
+    <svg className="fwdSpark" viewBox="0 0 100 40" preserveAspectRatio="none">
+      <path d={path("equal_weight")} className="bench" />
+      <path d={path("strategy")} className="strat" />
+    </svg>
+  );
+}
+
+function ForwardPanel({ fwd }: { fwd: any }) {
+  const t = fwd?.trend;
+  const ai = fwd?.ai;
+  const status = t?.status || "collecting";
+  const label =
+    status === "on_track"
+      ? "On track"
+      : status === "edge_gone"
+        ? "Edge gone — stop rule hit"
+        : `Collecting ${t?.days_evaluated ?? 0}/${t?.stop_rule?.min_days ?? 180} days`;
+  const fmt = (v: any, suffix = "") =>
+    v === null || v === undefined ? "—" : `${v}${suffix}`;
+  return (
+    <>
+      <div className="panelHeader compact">
+        <div>
+          <span className="kicker">Live paper · no backfill</span>
+          <h2>Forward test</h2>
+        </div>
+        <span className={`fwdStatus ${status}`}>{label}</span>
+      </div>
+      {!fwd ? (
+        <em>Loading forward results…</em>
+      ) : (
+        <>
+          <p className="trendNote">
+            Trend portfolio recorded daily from closed candles since{" "}
+            {t.first_date || "today"}. Stop rule (fixed in advance): after{" "}
+            {t.stop_rule.min_days} days, Sharpe &lt; {t.stop_rule.min_sharpe} or
+            drawdown beyond {t.stop_rule.max_dd_pct}% means the edge is gone.
+          </p>
+          <table className="trendTable">
+            <thead>
+              <tr>
+                <th />
+                <th>Live</th>
+                <th>Expected</th>
+                <th>Buy&amp;hold</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Return</td>
+                <td>{fmt(t.live?.total, "%")}</td>
+                <td>{fmt(t.expected.cagr_pct, "%/yr")}</td>
+                <td>{fmt(t.equal_weight?.total, "%")}</td>
+              </tr>
+              <tr>
+                <td>Sharpe</td>
+                <td>{fmt(t.live?.sharpe)}</td>
+                <td>{t.expected.sharpe}</td>
+                <td>{fmt(t.equal_weight?.sharpe)}</td>
+              </tr>
+              <tr>
+                <td>Max DD</td>
+                <td>{fmt(t.live?.max_dd, "%")}</td>
+                <td>{t.expected.max_dd_pct}%</td>
+                <td>{fmt(t.equal_weight?.max_dd, "%")}</td>
+              </tr>
+            </tbody>
+          </table>
+          <Sparkline points={t.equity || []} />
+          <p className="trendNote">
+            AI daily signals: {ai.resolved} resolved / {ai.signals} logged
+            (pending {ai.pending}). IC live {fmt(ai.ic)} vs expected{" "}
+            {ai.expected_ic}. Resolved LONG calls {ai.long_calls}, avg{" "}
+            {fmt(ai.long_avg_bps, " bps")} vs {ai.round_trip_cost_bps} bps cost,
+            hit rate{" "}
+            {ai.long_hit_rate === null
+              ? "—"
+              : `${Math.round(ai.long_hit_rate * 100)}%`}
+            .
+          </p>
+          {t.days_evaluated < 30 && (
+            <p className="trendNote">
+              Early days: under ~30 days, live numbers are mostly noise.
+            </p>
+          )}
+        </>
+      )}
+    </>
   );
 }
 

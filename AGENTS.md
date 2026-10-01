@@ -71,6 +71,11 @@ cd web && npm run build                # tsc -b && vite build
   `app/portfolio.py` (`GET /api/portfolio/trend`, Trend portfolio panel).
   Decisions may carry `levels["size"]` (fraction of equity) which
   `run_backtest` honours.
+- `app/forward.py` is the forward (live paper) test: the API records trend
+  weights + AI daily signals once per closed daily candle into
+  `data/forward/*.jsonl` (never backfill it). `GET /api/forward` scores it
+  against backtest expectations with a pre-committed stop rule; don't
+  loosen `STOP_RULE` after seeing live data.
 - `app/signals.py` computes the spread+fee-aware entry/exit edge card
   (`edge` in `/api/market` payloads).
 - `app/monitor.py` (SignalMonitor) logs opt-in per-symbol signal events to

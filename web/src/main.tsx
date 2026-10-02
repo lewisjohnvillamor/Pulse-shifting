@@ -1123,7 +1123,9 @@ function App() {
             <section key="trend" className="panel trendPanel">
               <div className="panelHeader compact">
                 <div>
-                  <span className="kicker">Validated · daily</span>
+                  <span className="kicker">
+                    Validated · daily · {trendPf?.validation?.universe}
+                  </span>
                   <h2>Trend portfolio</h2>
                 </div>
                 {trendPf && (
@@ -2134,8 +2136,8 @@ function ForwardPanel({ fwd }: { fwd: any }) {
       ) : (
         <>
           <p className="trendNote">
-            Trend portfolio recorded daily from closed candles since{" "}
-            {t.first_date || "today"}. Stop rule (fixed in advance): after{" "}
+            Trend portfolio ({t.coins} coins) recorded daily from closed candles
+            since {t.first_date || "today"}. Stop rule (fixed in advance): after{" "}
             {t.stop_rule.min_days} days, Sharpe &lt; {t.stop_rule.min_sharpe} or
             drawdown beyond {t.stop_rule.max_dd_pct}% means the edge is gone.
           </p>
@@ -2170,17 +2172,24 @@ function ForwardPanel({ fwd }: { fwd: any }) {
             </tbody>
           </table>
           <Sparkline points={t.equity || []} />
-          <p className="trendNote">
-            AI daily signals: {ai.resolved} resolved / {ai.signals} logged
-            (pending {ai.pending}). IC live {fmt(ai.ic)} vs expected{" "}
-            {ai.expected_ic}. Resolved LONG calls {ai.long_calls}, avg{" "}
-            {fmt(ai.long_avg_bps, " bps")} vs {ai.round_trip_cost_bps} bps cost,
-            hit rate{" "}
-            {ai.long_hit_rate === null
-              ? "—"
-              : `${Math.round(ai.long_hit_rate * 100)}%`}
-            .
-          </p>
+          {(["core", "extended"] as const).map((g) => {
+            const a = ai.groups?.[g];
+            if (!a) return null;
+            return (
+              <p className="trendNote" key={g}>
+                AI daily signals,{" "}
+                {g === "core" ? "6 training coins" : "other coins"}:{" "}
+                {a.resolved} resolved / {a.signals} logged. IC live {fmt(a.ic)}{" "}
+                vs expected {a.expected_ic}. Resolved LONG calls {a.long_calls},
+                avg {fmt(a.long_avg_bps, " bps")} vs {a.round_trip_cost_bps} bps
+                cost, hit rate{" "}
+                {a.long_hit_rate === null
+                  ? "—"
+                  : `${Math.round(a.long_hit_rate * 100)}%`}
+                .
+              </p>
+            );
+          })}
           {t.days_evaluated < 30 && (
             <p className="trendNote">
               Early days: under ~30 days, live numbers are mostly noise.

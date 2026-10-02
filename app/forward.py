@@ -30,13 +30,21 @@ from typing import Any
 
 import numpy as np
 
-from .alphalab import UNIVERSE, stats
-from .portfolio import VALIDATION
+from .alphalab import stats
+from .portfolio import TRADING_UNIVERSE, VALIDATION
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "forward"
 TREND_FILE = "trend_portfolio.jsonl"
 AI_FILE = "ai_signals.jsonl"
-AI_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT"]
+# Trend records are tagged with the universe they were computed on; only
+# records of the current universe are evaluated (changing the coin set
+# changes the strategy, so its forward clock restarts).
+UNIVERSE_VERSION = f"{len(TRADING_UNIVERSE)}-coin-2026-10"
+# AI signals: "core" = the 6 coins the model was trained on (daily OOS IC
+# +0.093); "extended" = the other trading coins (daily OOS IC +0.044 on the
+# same unseen period, positive for 21/32 coins). Scored separately.
+AI_CORE = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT"]
+AI_SYMBOLS = list(dict.fromkeys([*AI_CORE, *TRADING_UNIVERSE]))
 COST_BPS = 12.0
 
 # Expectations from the out-of-sample backtests, and the pre-committed rule
@@ -44,8 +52,8 @@ COST_BPS = 12.0
 EXPECTED = {
     "trend_sharpe": VALIDATION["sharpe"],
     "trend_max_dd_pct": VALIDATION["max_dd_pct"],
-    "trend_cagr_pct": 24.7,
-    "ai_1d_ic": 0.093,
+    "trend_cagr_pct": VALIDATION["cagr_pct"],
+    "ai_1d_ic": {"core": 0.093, "extended": 0.044},
 }
 STOP_RULE = {"min_days": 180, "min_sharpe": 0.3, "max_dd_pct": -35.0}
 
@@ -101,6 +109,7 @@ class ForwardTracker:
         built = portfolio.build(data, COST_BPS)
         record = {
             "date": date,
+            "universe": UNIVERSE_VERSION,
             "recorded_at": int(time.time() * 1000),
             "weights": {
                 h["symbol"]: round(h["weight_pct"] / 100, 6) for h in built["holdings"]
@@ -131,6 +140,7 @@ class ForwardTracker:
             record = {
                 "date": date,
                 "symbol": sym,
+                "group": "core" if sym in AI_CORE else "extended",
                 "action": d["action"],
                 "price": float(c[-1]["close"]),
                 "expected_move_bps": levels.get("expected_move_bps"),
@@ -144,7 +154,11 @@ class ForwardTracker:
     # -- evaluation ------------------------------------------------------
 
     def evaluate_trend(self) -> dict[str, Any]:
-        recs = sorted(self._read(TREND_FILE), key=lambda r: r["date"])
+        all_recs = self._read(TREND_FILE)
+        recs = sorted(
+            (r for r in all_recs if r.get("universe") == UNIVERSE_VERSION),
+            key=lambda r: r["date"],
+        )
         pnl, bench, curve = [], [], []
         prev_w: dict[str, float] = {}
         for a, b in zip(recs, recs[1:]):
@@ -180,6 +194,9 @@ class ForwardTracker:
         elif s and s["max_dd"] < STOP_RULE["max_dd_pct"]:
             status = "edge_gone"  # drawdown breach counts at any time
         return {
+            "universe": UNIVERSE_VERSION,
+            "coins": len(TRADING_UNIVERSE),
+            "earlier_universe_records": len(all_recs) - len(recs),
             "records": len(recs),
             "first_date": recs[0]["date"] if recs else None,
             "last_date": recs[-1]["date"] if recs else None,
@@ -204,9 +221,24 @@ class ForwardTracker:
         }
 
     def evaluate_ai(self, closes: dict[str, dict[str, float]]) -> dict[str, Any]:
-        """Score recorded daily AI signals whose horizon has elapsed.
-        `closes` maps symbol -> {date: close} of closed daily candles."""
+        """Score recorded daily AI signals whose horizon has elapsed, per
+        group. `closes` maps symbol -> {date: close} of closed daily candles."""
         recs = self._read(AI_FILE)
+        out = {"signals": len(recs), "groups": {}}
+        for group in ("core", "extended"):
+            rows = [
+                r
+                for r in recs
+                if r.get("group", "core" if r["symbol"] in AI_CORE else "extended")
+                == group
+            ]
+            out["groups"][group] = self._score_ai(
+                rows, closes, EXPECTED["ai_1d_ic"][group]
+            )
+        return out
+
+    @staticmethod
+    def _score_ai(recs: list[dict], closes: dict, expected_ic: float) -> dict[str, Any]:
         exp, real, long_rets = [], [], []
         pending = 0
         for r in recs:
@@ -235,7 +267,7 @@ class ForwardTracker:
             "resolved": len(real),
             "pending": pending,
             "ic": None if ic is None or math.isnan(ic) else round(ic, 4),
-            "expected_ic": EXPECTED["ai_1d_ic"],
+            "expected_ic": expected_ic,
             "long_calls": len(long_rets),
             "long_avg_bps": round(float(np.mean(long_rets)), 1) if long_rets else None,
             "long_hit_rate": round(float(np.mean(np.array(long_rets) > 0)), 3)
@@ -250,8 +282,11 @@ class ForwardTracker:
 
 
 async def record_now(market, registry, extra_symbols: list[str] = ()) -> dict:
+    # `extra_symbols` (e.g. pinned coins) is ignored on purpose: the forward
+    # test must track a fixed universe, or pinning a coin would silently
+    # change the strategy being tested.
     """Fetch daily candles and record today's trend weights + AI signals."""
-    symbols = list(dict.fromkeys([*UNIVERSE, *extra_symbols]))
+    symbols = list(dict.fromkeys([*TRADING_UNIVERSE, *AI_SYMBOLS]))
 
     async def daily(sym: str):
         try:

@@ -271,3 +271,32 @@ time.
 python -m app.forward record   # record now (e.g. from cron if the API isn't running)
 python -m app.forward report   # live vs expected summary
 ```
+
+### Expanded universe (38 coins)
+
+The trend portfolio and forward test now cover 38 coins
+(`alphalab.EXPANDED_UNIVERSE`). The rule for picking them: top-70 USDT
+pairs by volume, no stablecoins or tokenized stocks, listed on Binance by
+2023-03-31. The original 20 are always included. Out of sample
+(`python -m app.alphalab trend --universe expanded`), from 2023-09-17:
+
+| | 20 coins | 38 coins |
+|---|---|---|
+| Sharpe | 1.17 | **1.35** |
+| Max drawdown | −23.7% | **−22.1%** |
+| In-sample Sharpe | 1.10 | 1.28 |
+| Sharpe range, 9 variants | 1.02–1.24 | 1.12–1.40 |
+
+Survivorship check: on only the 18 added coins, buy&hold had Sharpe 0.74
+and −84% max DD, while trend had 1.40 and −22%. The gain comes from
+diversification, not from picking past winners. Selecting by today's
+volume still adds bias, so treat absolute returns as optimistic.
+
+The forward test tags records with the universe they were computed on and
+only scores the current one, because changing the coin set restarts the
+clock. Pinned coins are no longer mixed into the tracked portfolio. AI
+daily signals are logged for all 38 coins and scored in two groups:
+
+- the 6 training coins, expected IC +0.093;
+- the 32 others, expected IC +0.044 (positive for 21/32 on the same
+  unseen period).

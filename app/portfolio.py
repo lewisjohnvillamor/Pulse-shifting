@@ -14,6 +14,7 @@ import math
 import numpy as np
 
 from .alphalab import (
+    EXPANDED_UNIVERSE,
     TARGET_VOL,
     TREND_PAIRS,
     VOL_LOOKBACK,
@@ -25,15 +26,20 @@ from .alphalab import (
     trend_weights,
 )
 
+# Coins the portfolio trades (alphalab.EXPANDED_UNIVERSE, 38 coins).
+TRADING_UNIVERSE = EXPANDED_UNIVERSE
+
 VALIDATION = {
-    "test": "python -m app.alphalab trend",
-    "period_out_of_sample": "2023-09-16 onward",
-    "sharpe": 1.17,
-    "sharpe_equal_weight": 0.74,
+    "test": "python -m app.alphalab trend --universe expanded",
+    "universe": f"{len(EXPANDED_UNIVERSE)} coins",
+    "period_out_of_sample": "2023-09-17 onward",
+    "sharpe": 1.35,
+    "sharpe_equal_weight": 0.77,
     "sharpe_btc": 1.04,
-    "max_dd_pct": -23.7,
-    "max_dd_equal_weight_pct": -70.4,
+    "max_dd_pct": -22.1,
+    "max_dd_equal_weight_pct": -76.5,
     "max_dd_btc_pct": -53.0,
+    "cagr_pct": 24.5,
 }
 
 

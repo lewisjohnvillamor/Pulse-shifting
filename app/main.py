@@ -527,10 +527,10 @@ async def trend_portfolio(symbols: str = "", cost_bps: float = 12.0):
     import time
 
     from . import portfolio
-    from .alphalab import UNIVERSE
+    from .portfolio import TRADING_UNIVERSE
 
     chosen = [_clean_symbol(x) for x in symbols.split(",") if x.strip()] or list(
-        dict.fromkeys([*UNIVERSE, *watchlist.symbols])
+        dict.fromkeys([*TRADING_UNIVERSE, *watchlist.symbols])
     )
     key = ",".join(chosen) + f"|{cost_bps}"
     hit = _TREND_CACHE.get(key)

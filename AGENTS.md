@@ -76,6 +76,8 @@ cd web && npm run build                # tsc -b && vite build
   `data/forward/*.jsonl` (never backfill it). `GET /api/forward` scores it
   against backtest expectations with a pre-committed stop rule; don't
   loosen `STOP_RULE` after seeing live data.
+  It tracks the fixed `portfolio.TRADING_UNIVERSE` (38 coins); bump
+  `UNIVERSE_VERSION` if the coin set ever changes.
 - `app/signals.py` computes the spread+fee-aware entry/exit edge card
   (`edge` in `/api/market` payloads).
 - `app/monitor.py` (SignalMonitor) logs opt-in per-symbol signal events to

@@ -60,6 +60,37 @@ UNIVERSE = [
 ]
 START = "2020-09-01"  # every UNIVERSE coin trades on Binance spot by then
 
+# Expanded universe (2026-10): top-70 USDT pairs by volume, excluding
+# stablecoins and tokenized stocks, listed on Binance by 2023-03-31 (so
+# there is history before the 2023-09 out-of-sample split), plus the
+# original 20. Chosen by rule, not by performance; selecting by today's
+# volume adds survivorship bias on top of the original universe's.
+EXPANDED_UNIVERSE = list(
+    dict.fromkeys(
+        UNIVERSE
+        + [
+            "ZECUSDT",
+            "QNTUSDT",
+            "MOVRUSDT",
+            "VTHOUSDT",
+            "FETUSDT",
+            "HBARUSDT",
+            "ALICEUSDT",
+            "GTCUSDT",
+            "ARBUSDT",
+            "SYNUSDT",
+            "JASMYUSDT",
+            "DASHUSDT",
+            "INJUSDT",
+            "OPUSDT",
+            "STXUSDT",
+            "APTUSDT",
+            "ICPUSDT",
+            "ARUSDT",
+        ]
+    )
+)
+
 DAY_MS = 86_400_000
 INTERVAL_MS = {
     "1m": 60_000,
@@ -357,7 +388,7 @@ def _report(name: str, pnl: np.ndarray, t: np.ndarray, per_year: float) -> None:
 
 
 def cmd_trend(args: argparse.Namespace) -> None:
-    p = daily_panel()
+    p = daily_panel(EXPANDED_UNIVERSE if args.universe == "expanded" else UNIVERSE)
     close, t = p["close"], p["t"]
     cost = args.cost_bps
     print(
@@ -736,6 +767,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--cost-bps", type=float, default=10.0, help="cost per unit turnover"
     )
+    ap.add_argument("--universe", choices=["core", "expanded"], default="core")
     args = ap.parse_args(argv)
     COMMANDS[args.command](args)
 

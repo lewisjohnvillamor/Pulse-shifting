@@ -13,7 +13,7 @@ parts that always run together:
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/pip install ruff pre-commit
+.venv/bin/pip install ruff pre-commit pytest pytest-asyncio
 .venv/bin/pre-commit install
 
 cd web && npm install
@@ -32,6 +32,7 @@ cd web && npm run dev
 
 ```bash
 .venv/bin/pre-commit run --all-files   # ruff + prettier + file hygiene
+.venv/bin/pytest                       # core accounting/persistence tests
 cd web && npm run build                # tsc -b && vite build
 ```
 
@@ -48,7 +49,13 @@ cd web && npm run build                # tsc -b && vite build
   symbol; subscribe via `POST /api/watchlist` or automatically when a symbol is
   requested.
 - `PaperBroker` tracks one position per symbol plus shared cash; account
-  snapshots are computed against a `{symbol: price}` map.
+  snapshots are computed against a `{symbol: price}` map. State persists
+  to `data/paper_account.json` after every trade/reset.
+- External-model plugins (`jev`, `laya`) call endpoints synchronously; after
+  a failure `app/ai.py` marks them offline for 60 s so they never block the
+  live loop or a backtest. Keep that cooldown if you add another adapter.
+- `/api/market` returns `edges` (one edge card per strategy) alongside the
+  baseline `edge`; the UI shows the focused strategy's.
 - Strategies implement `Strategy.decide(candles, spread_bps)` in
   `app/strategy.py` and must remain symbol-agnostic. Built-ins live in
   `app/strategy.py`; user plugins drop into `strategies/` (`.py` or `.json`,

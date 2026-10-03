@@ -1599,3 +1599,18 @@ td {
   padding-left: 11px;
   padding-right: 11px;
 }
+
+.statusDot.lost {
+  background: #c44f5e;
+}
+.statusDot.connecting {
+  background: #d1d5db;
+}
+.verdictWho {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  opacity: 0.75;
+  margin-top: 2px;
+}

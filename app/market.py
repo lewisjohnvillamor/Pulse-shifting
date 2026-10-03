@@ -44,26 +44,46 @@ class BinancePublicClient:
         await self.client.aclose()
 
     async def _get(
-        self, path: str, params: dict[str, Any] | None = None
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> httpx.Response:
-        response = await self.client.get(path, params=params)
+        kwargs: dict[str, Any] = {"params": params}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        response = await self.client.get(path, **kwargs)
         if (
             response.status_code in (403, 451)
             and str(self.client.base_url) != BINANCE_FALLBACK_BASE
         ):
             self.client.base_url = BINANCE_FALLBACK_BASE
-            response = await self.client.get(path, params=params)
+            response = await self.client.get(path, **kwargs)
         response.raise_for_status()
         return response
 
     async def list_symbols(self) -> list[dict[str, Any]]:
-        """Tradable USDT-quoted spot symbols, cached for 10 minutes."""
+        """Tradable USDT-quoted spot symbols, cached for 10 minutes.
+
+        The unfiltered exchangeInfo payload is ~18 MB and could exceed the
+        default timeout on slower links (search then hung). Requesting only
+        TRADING symbols without permission sets is ~2.5 MB; it also gets a
+        longer timeout, and a stale list is served if a refresh fails.
+        """
         now = time.time()
         if self._symbols_cache and now - self._symbols_cache[0] < 600:
             return self._symbols_cache[1]
 
-        response = await self._get("/api/v3/exchangeInfo")
-        response.raise_for_status()
+        try:
+            response = await self._get(
+                "/api/v3/exchangeInfo",
+                params={"symbolStatus": "TRADING", "showPermissionSets": "false"},
+                timeout=30.0,
+            )
+        except Exception:
+            if self._symbols_cache:
+                return self._symbols_cache[1]
+            raise
         symbols = [
             {
                 "symbol": item["symbol"],
@@ -83,13 +103,27 @@ class BinancePublicClient:
         self, query: str = "", limit: int = 50
     ) -> list[dict[str, Any]]:
         symbols = await self.list_symbols()
-        if query:
-            needle = query.upper().strip()
-            symbols = [
-                item
-                for item in symbols
-                if needle in item["symbol"] or needle in item["base"]
-            ]
+        needle = query.upper().strip()
+        if needle:
+            # Exact base first (SOL -> SOLUSDT), then prefix, then substring.
+            def rank(item: dict[str, Any]) -> tuple[int, int, str]:
+                base = item["base"]
+                if base == needle:
+                    tier = 0
+                elif base.startswith(needle):
+                    tier = 1
+                else:
+                    tier = 2
+                return (tier, len(base), item["symbol"])
+
+            symbols = sorted(
+                (
+                    item
+                    for item in symbols
+                    if needle in item["symbol"] or needle in item["base"]
+                ),
+                key=rank,
+            )
         return symbols[:limit]
 
     async def snapshot(self, symbol: str = "BTCUSDT") -> MarketSnapshot:

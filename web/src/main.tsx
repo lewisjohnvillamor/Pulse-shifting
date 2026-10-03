@@ -162,6 +162,11 @@ function App() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SymbolResult[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [searchState, setSearchState] = useState<"loading" | "done" | "error">(
+    "loading",
+  );
+  const [searchError, setSearchError] = useState("");
+  const [searchNonce, setSearchNonce] = useState(0);
   const [strategies, setStrategies] = useState<any[]>([]);
   const [focusStrategy, setFocusStrategy] = useState("ema_momentum");
   const [btStrategy, setBtStrategy] = useState("ema_momentum");
@@ -344,21 +349,55 @@ function App() {
     return () => ws.close();
   }, [active, refresh]);
 
-  // Symbol search.
+  // Symbol search. Stale responses are ignored, and failures surface as an
+  // error with a retry instead of an endless "Searching…".
   useEffect(() => {
     if (!pickerOpen) return;
+    let cancelled = false;
+    setSearchState("loading");
     const id = setTimeout(async () => {
       try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 35000);
         const r = await fetch(
           API + "/api/symbols?query=" + encodeURIComponent(query),
+          { signal: ctrl.signal },
         );
-        if (r.ok) setResults((await r.json()).symbols);
-      } catch {
-        /* ignore */
+        clearTimeout(timer);
+        if (cancelled) return;
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          setSearchError(body.detail || `Search failed (${r.status})`);
+          setSearchState("error");
+          return;
+        }
+        setResults((await r.json()).symbols);
+        setSearchState("done");
+      } catch (e: any) {
+        if (cancelled) return;
+        setSearchError(
+          e?.name === "AbortError"
+            ? "Binance symbol list timed out"
+            : "Cannot reach the local API",
+        );
+        setSearchState("error");
       }
     }, 200);
-    return () => clearTimeout(id);
-  }, [query, pickerOpen]);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [query, pickerOpen, searchNonce]);
+
+  // While a request is in flight, filter what we already have so the list
+  // always matches the typed text (previously the old list lingered).
+  const needle = query.trim().toUpperCase();
+  const shownResults =
+    searchState === "loading" && needle
+      ? results.filter(
+          (r) => r.symbol.includes(needle) || r.base.includes(needle),
+        )
+      : results;
 
   const pin = async (symbol: string) => {
     const r = await fetch(API + "/api/watchlist", {
@@ -698,17 +737,37 @@ function App() {
               placeholder="Search Binance spot symbols (e.g. ETH, SOL)…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && shownResults[0])
+                  pin(shownResults[0].symbol);
+              }}
             />
           </div>
           <div className="pickerResults">
-            {results.map((s) => (
+            {shownResults.map((s) => (
               <button key={s.symbol} onClick={() => pin(s.symbol)}>
                 <strong>{s.base}</strong>
                 <span>{s.symbol}</span>
                 {s.pinned ? <Pin size={13} /> : <Plus size={13} />}
               </button>
             ))}
-            {!results.length && <em>Searching Binance symbols…</em>}
+            {searchState === "loading" && !shownResults.length && (
+              <em>Searching Binance symbols…</em>
+            )}
+            {searchState === "done" && !results.length && (
+              <em>No USDT spot pairs match “{query.trim()}”.</em>
+            )}
+            {searchState === "error" && (
+              <em className="pickerError">
+                {searchError}.{" "}
+                <button
+                  className="linkButton"
+                  onClick={() => setSearchNonce((n) => n + 1)}
+                >
+                  Retry
+                </button>
+              </em>
+            )}
           </div>
         </div>
       )}
@@ -1147,55 +1206,57 @@ function App() {
                     drawdown {trendPf.validation.max_dd_pct}% vs{" "}
                     {trendPf.validation.max_dd_equal_weight_pct}%.
                   </p>
-                  <table className="trendTable">
-                    <thead>
-                      <tr>
-                        <th>Coin</th>
-                        <th>Trend</th>
-                        <th>Vol/yr</th>
-                        <th>Target weight</th>
-                        <th />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {trendPf.holdings.map((h: any) => (
-                        <tr
-                          key={h.symbol}
-                          className={h.action === "HOLD" ? "" : "out"}
-                        >
-                          <td>{h.symbol.replace("USDT", "")}</td>
-                          <td
-                            className={
-                              h.trend > 0 ? "up" : h.trend < 0 ? "down" : ""
-                            }
-                          >
-                            {h.trend > 0 ? "+" : ""}
-                            {h.trend.toFixed(2)}
-                          </td>
-                          <td>{h.vol_pct ?? "—"}%</td>
-                          <td>
-                            <span className="weightBar">
-                              <i
-                                style={{
-                                  width: `${Math.min(h.weight_pct * 20, 100)}%`,
-                                }}
-                              />
-                            </span>
-                            {h.weight_pct.toFixed(2)}%
-                          </td>
-                          <td>{h.action}</td>
+                  <div className="panelScroll">
+                    <table className="trendTable">
+                      <thead>
+                        <tr>
+                          <th>Coin</th>
+                          <th>Trend</th>
+                          <th>Vol/yr</th>
+                          <th>Target weight</th>
+                          <th />
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <p className="trendNote">
-                    Last {trendPf.window.years} yrs replay: Sharpe{" "}
-                    {trendPf.window.strategy.sharpe} (buy&amp;hold{" "}
-                    {trendPf.window.equal_weight.sharpe}), max DD{" "}
-                    {trendPf.window.strategy.max_dd}% (
-                    {trendPf.window.equal_weight.max_dd}%), turnover{" "}
-                    {trendPf.annualised_turnover}×/yr. Paper only.
-                  </p>
+                      </thead>
+                      <tbody>
+                        {trendPf.holdings.map((h: any) => (
+                          <tr
+                            key={h.symbol}
+                            className={h.action === "HOLD" ? "" : "out"}
+                          >
+                            <td>{h.symbol.replace("USDT", "")}</td>
+                            <td
+                              className={
+                                h.trend > 0 ? "up" : h.trend < 0 ? "down" : ""
+                              }
+                            >
+                              {h.trend > 0 ? "+" : ""}
+                              {h.trend.toFixed(2)}
+                            </td>
+                            <td>{h.vol_pct ?? "—"}%</td>
+                            <td>
+                              <span className="weightBar">
+                                <i
+                                  style={{
+                                    width: `${Math.min(h.weight_pct * 20, 100)}%`,
+                                  }}
+                                />
+                              </span>
+                              {h.weight_pct.toFixed(2)}%
+                            </td>
+                            <td>{h.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="trendNote">
+                      Last {trendPf.window.years} yrs replay: Sharpe{" "}
+                      {trendPf.window.strategy.sharpe} (buy&amp;hold{" "}
+                      {trendPf.window.equal_weight.sharpe}), max DD{" "}
+                      {trendPf.window.strategy.max_dd}% (
+                      {trendPf.window.equal_weight.max_dd}%), turnover{" "}
+                      {trendPf.annualised_turnover}×/yr. Paper only.
+                    </p>
+                  </div>
                 </>
               ) : (
                 <em>Loading daily candles for the trend portfolio…</em>
@@ -2122,6 +2183,8 @@ function ForwardPanel({ fwd }: { fwd: any }) {
         : `Collecting ${t?.days_evaluated ?? 0}/${t?.stop_rule?.min_days ?? 180} days`;
   const fmt = (v: any, suffix = "") =>
     v === null || v === undefined ? "—" : `${v}${suffix}`;
+  // Sharpe and drawdown are meaningless with fewer than 2 scored days.
+  const enough = (t?.days_evaluated ?? 0) >= 2;
   return (
     <>
       <div className="panelHeader compact">
@@ -2141,60 +2204,62 @@ function ForwardPanel({ fwd }: { fwd: any }) {
             {t.stop_rule.min_days} days, Sharpe &lt; {t.stop_rule.min_sharpe} or
             drawdown beyond {t.stop_rule.max_dd_pct}% means the edge is gone.
           </p>
-          <table className="trendTable">
-            <thead>
-              <tr>
-                <th />
-                <th>Live</th>
-                <th>Expected</th>
-                <th>Buy&amp;hold</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Return</td>
-                <td>{fmt(t.live?.total, "%")}</td>
-                <td>{fmt(t.expected.cagr_pct, "%/yr")}</td>
-                <td>{fmt(t.equal_weight?.total, "%")}</td>
-              </tr>
-              <tr>
-                <td>Sharpe</td>
-                <td>{fmt(t.live?.sharpe)}</td>
-                <td>{t.expected.sharpe}</td>
-                <td>{fmt(t.equal_weight?.sharpe)}</td>
-              </tr>
-              <tr>
-                <td>Max DD</td>
-                <td>{fmt(t.live?.max_dd, "%")}</td>
-                <td>{t.expected.max_dd_pct}%</td>
-                <td>{fmt(t.equal_weight?.max_dd, "%")}</td>
-              </tr>
-            </tbody>
-          </table>
-          <Sparkline points={t.equity || []} />
-          {(["core", "extended"] as const).map((g) => {
-            const a = ai.groups?.[g];
-            if (!a) return null;
-            return (
-              <p className="trendNote" key={g}>
-                AI daily signals,{" "}
-                {g === "core" ? "6 training coins" : "other coins"}:{" "}
-                {a.resolved} resolved / {a.signals} logged. IC live {fmt(a.ic)}{" "}
-                vs expected {a.expected_ic}. Resolved LONG calls {a.long_calls},
-                avg {fmt(a.long_avg_bps, " bps")} vs {a.round_trip_cost_bps} bps
-                cost, hit rate{" "}
-                {a.long_hit_rate === null
-                  ? "—"
-                  : `${Math.round(a.long_hit_rate * 100)}%`}
-                .
+          <div className="panelScroll">
+            <table className="trendTable">
+              <thead>
+                <tr>
+                  <th />
+                  <th>Live</th>
+                  <th>Expected</th>
+                  <th>Buy&amp;hold</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Return</td>
+                  <td>{fmt(t.live?.total, "%")}</td>
+                  <td>{fmt(t.expected.cagr_pct, "%/yr")}</td>
+                  <td>{fmt(t.equal_weight?.total, "%")}</td>
+                </tr>
+                <tr>
+                  <td>Sharpe</td>
+                  <td>{enough ? fmt(t.live?.sharpe) : "—"}</td>
+                  <td>{t.expected.sharpe}</td>
+                  <td>{enough ? fmt(t.equal_weight?.sharpe) : "—"}</td>
+                </tr>
+                <tr>
+                  <td>Max DD</td>
+                  <td>{enough ? fmt(t.live?.max_dd, "%") : "—"}</td>
+                  <td>{t.expected.max_dd_pct}%</td>
+                  <td>{enough ? fmt(t.equal_weight?.max_dd, "%") : "—"}</td>
+                </tr>
+              </tbody>
+            </table>
+            <Sparkline points={t.equity || []} />
+            {(["core", "extended"] as const).map((g) => {
+              const a = ai.groups?.[g];
+              if (!a) return null;
+              return (
+                <p className="trendNote" key={g}>
+                  AI daily signals,{" "}
+                  {g === "core" ? "6 training coins" : "other coins"}:{" "}
+                  {a.resolved} resolved / {a.signals} logged. IC live{" "}
+                  {fmt(a.ic)} vs expected {a.expected_ic}. Resolved LONG calls{" "}
+                  {a.long_calls}, avg {fmt(a.long_avg_bps, " bps")} vs{" "}
+                  {a.round_trip_cost_bps} bps cost, hit rate{" "}
+                  {a.long_hit_rate === null
+                    ? "—"
+                    : `${Math.round(a.long_hit_rate * 100)}%`}
+                  .
+                </p>
+              );
+            })}
+            {t.days_evaluated < 30 && (
+              <p className="trendNote">
+                Early days: under ~30 days, live numbers are mostly noise.
               </p>
-            );
-          })}
-          {t.days_evaluated < 30 && (
-            <p className="trendNote">
-              Early days: under ~30 days, live numbers are mostly noise.
-            </p>
-          )}
+            )}
+          </div>
         </>
       )}
     </>

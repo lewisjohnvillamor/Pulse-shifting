@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 @dataclass
@@ -42,12 +44,58 @@ class PaperBroker:
     realized_pnl: float = 0.0
     positions: dict[str, Position] = field(default_factory=dict)
     trades: list[Trade] = field(default_factory=list)
+    # Optional on-disk state (data/paper_account.json) so the paper account
+    # survives restarts; None keeps the broker purely in memory.
+    path: Path | None = None
 
     def reset(self) -> None:
         self.cash = self.starting_cash
         self.realized_pnl = 0.0
         self.positions.clear()
         self.trades.clear()
+        self.save()
+
+    # -- persistence -------------------------------------------------------
+
+    def save(self) -> None:
+        if self.path is None:
+            return
+        state = {
+            "version": 1,
+            "starting_cash": self.starting_cash,
+            "fee_bps": self.fee_bps,
+            "cash": self.cash,
+            "realized_pnl": self.realized_pnl,
+            "positions": {
+                s: {"qty": p.qty, "entry_price": p.entry_price}
+                for s, p in self.positions.items()
+                if p.qty > 0
+            },
+            "trades": [t.as_dict() for t in self.trades[-5000:]],
+        }
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, indent=1))
+        tmp.replace(self.path)  # atomic on POSIX and Windows
+
+    def load(self) -> bool:
+        """Restore state from `path`. Returns False (and keeps defaults) if
+        there is nothing to load or the file is unreadable."""
+        if self.path is None or not self.path.exists():
+            return False
+        try:
+            state = json.loads(self.path.read_text())
+            self.starting_cash = float(state.get("starting_cash", self.starting_cash))
+            self.cash = float(state["cash"])
+            self.realized_pnl = float(state.get("realized_pnl", 0.0))
+            self.positions = {
+                s: Position(float(p["qty"]), float(p["entry_price"]))
+                for s, p in state.get("positions", {}).items()
+            }
+            self.trades = [Trade(**t) for t in state.get("trades", [])]
+            return True
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return False
 
     def position(self, symbol: str) -> Position:
         return self.positions.setdefault(symbol, Position())
@@ -67,6 +115,7 @@ class PaperBroker:
 
         trade = Trade(symbol, "BUY", added_qty, price, fee, 0.0, self._now())
         self.trades.append(trade)
+        self.save()
         return trade
 
     def sell(self, symbol: str, qty: float, price: float) -> Trade:
@@ -86,6 +135,7 @@ class PaperBroker:
 
         trade = Trade(symbol, "SELL", qty, price, fee, pnl, self._now())
         self.trades.append(trade)
+        self.save()
         return trade
 
     def position_qty(self, symbol: str) -> float:

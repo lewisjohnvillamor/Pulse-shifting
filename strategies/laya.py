@@ -22,6 +22,7 @@ import os
 import urllib.error
 import urllib.request
 
+from app.ai import mark_offline, mark_online, offline
 from app.strategy import Decision, ParamSpec, Strategy
 
 LAYA_URL = os.environ.get("LAYA_URL", "http://127.0.0.1:8791/decide")
@@ -40,6 +41,10 @@ class LayaStrategy(Strategy):
     def decide(self, candles: list[dict], spread_bps: float = 0.0) -> Decision:
         if len(candles) < self.min_candles:
             return Decision("FLAT", 0.0, "UNKNOWN", 0.0, 0.0, ["Warming up"])
+        if offline(self.id):
+            return Decision(
+                "FLAT", 0.0, "OFFLINE", 0.0, 0.0, [f"Laya offline at {LAYA_URL}"]
+            )
 
         window = candles[-60:]
         body = json.dumps(
@@ -61,9 +66,11 @@ class LayaStrategy(Strategy):
             ) as response:
                 result = json.loads(response.read())
         except (urllib.error.URLError, OSError, ValueError):
+            mark_offline(self.id)
             return Decision(
                 "FLAT", 0.0, "OFFLINE", 0.0, 0.0, [f"Laya offline at {LAYA_URL}"]
             )
+        mark_online(self.id)
 
         action = str(result.get("action", "FLAT")).upper()
         if action not in ("LONG", "SHORT", "FLAT"):

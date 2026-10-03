@@ -46,6 +46,7 @@ type MarketData = {
   decision: any;
   decisions?: Record<string, any>;
   edge?: any;
+  edges?: Record<string, any>;
   account: any;
   candles: Candle[];
   strategies?: string[];
@@ -168,7 +169,23 @@ function App() {
   const [searchError, setSearchError] = useState("");
   const [searchNonce, setSearchNonce] = useState(0);
   const [strategies, setStrategies] = useState<any[]>([]);
-  const [focusStrategy, setFocusStrategy] = useState("ema_momentum");
+  const [focusStrategy, setFocusStrategy] = useState<string>(() => {
+    try {
+      return localStorage.getItem("pulseshift-focus") || "ai_regime_fusion";
+    } catch {
+      return "ai_regime_fusion";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("pulseshift-focus", focusStrategy);
+    } catch {
+      /* ignore */
+    }
+  }, [focusStrategy]);
+  const [apiLink, setApiLink] = useState<"connecting" | "live" | "lost">(
+    "connecting",
+  );
   const [btStrategy, setBtStrategy] = useState("ema_momentum");
   const [styleFilter, setStyleFilter] = useState("all");
   const [paramDrafts, setParamDrafts] = useState<Record<string, string>>({});
@@ -317,8 +334,32 @@ function App() {
     setData(null);
     setBt(null);
     refresh(active);
-    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/market?symbol=${active}`);
-    ws.onmessage = (event) => {
+    // Live stream with automatic reconnect: a restarted API used to leave
+    // the dashboard silently frozen on its last packet.
+    let ws: WebSocket | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
+    let attempt = 0;
+    const connect = () => {
+      if (disposed) return;
+      ws = new WebSocket(`ws://127.0.0.1:8000/ws/market?symbol=${active}`);
+      ws.onopen = () => {
+        attempt = 0;
+        setApiLink("live");
+        setError("");
+        refresh(active); // catch up on anything missed while disconnected
+      };
+      ws.onclose = () => {
+        if (disposed) return;
+        setApiLink("lost");
+        const delay = Math.min(1000 * 2 ** attempt, 15000);
+        attempt += 1;
+        timer = setTimeout(connect, delay);
+      };
+      ws.onerror = () => ws?.close();
+      ws.onmessage = handleMessage;
+    };
+    const handleMessage = (event: MessageEvent) => {
       const packet = JSON.parse(event.data);
       if (packet.type !== "market") return;
       setData((current) => {
@@ -344,9 +385,12 @@ function App() {
         return next;
       });
     };
-    ws.onerror = () => setError("Live market stream disconnected");
-    ws.onopen = () => setError("");
-    return () => ws.close();
+    connect();
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+      ws?.close();
+    };
   }, [active, refresh]);
 
   // Symbol search. Stale responses are ignored, and failures surface as an
@@ -653,10 +697,14 @@ function App() {
           </button>
         </nav>
         <div className="marketStatus">
-          <span className="statusDot" /> Paper only <span>·</span>{" "}
-          {data?.stream_connected === false
-            ? "Reconnecting"
-            : "Live Binance stream"}
+          <span className={`statusDot ${apiLink}`} /> Paper only <span>·</span>{" "}
+          {apiLink === "lost"
+            ? "Local API offline — reconnecting"
+            : apiLink === "connecting"
+              ? "Connecting"
+              : data?.stream_connected === false
+                ? "Binance stream reconnecting"
+                : "Live Binance stream"}
           <button
             className="gearButton"
             title="Provider settings"
@@ -1025,56 +1073,61 @@ function App() {
                   <h2>Entry / exit</h2>
                 </div>
               </div>
-              {data.edge ? (
-                <>
-                  <div
-                    className={`verdict ${data.edge.verdict.startsWith("ENTER") ? "up" : data.edge.verdict === "NO_TRADE" ? "" : "warn"}`}
-                  >
-                    {data.edge.verdict.replace(/_/g, " ")}
-                  </div>
-                  <div className="twoCol">
-                    <Stat
-                      label="Win probability"
-                      value={pct(data.edge.win_probability * 100)}
-                    />
-                    <Stat
-                      label="Net edge"
-                      value={`${data.edge.net_edge_pct >= 0 ? "+" : ""}${data.edge.net_edge_pct.toFixed(3)}%`}
-                    />
-                    <Stat
-                      label="Breakeven move"
-                      value={`${data.edge.breakeven_move_pct.toFixed(3)}%`}
-                    />
-                    <Stat
-                      label="Expected move"
-                      value={`${data.edge.expected_move_pct.toFixed(3)}%`}
-                    />
-                    <Stat
-                      label="Entry (bid)"
-                      value={money(data.edge.suggested_entry)}
-                    />
-                    <Stat
-                      label="Target"
-                      value={
-                        data.edge.suggested_target
-                          ? money(data.edge.suggested_target)
-                          : "—"
-                      }
-                    />
-                    <Stat
-                      label="Stop"
-                      value={
-                        data.edge.suggested_stop
-                          ? money(data.edge.suggested_stop)
-                          : "—"
-                      }
-                    />
-                  </div>
-                  <small className="edgeNote">{data.edge.note}</small>
-                </>
-              ) : (
-                <em>Warming up…</em>
-              )}
+              {(() => {
+                const edge = data.edges?.[focusStrategy] ?? data.edge;
+                const meta = strategies.find((s) => s.id === focusStrategy);
+                return edge ? (
+                  <>
+                    <div
+                      className={`verdict ${edge.verdict.startsWith("ENTER") ? "up" : edge.verdict === "NO_TRADE" ? "" : "warn"}`}
+                    >
+                      {edge.verdict.replace(/_/g, " ")}
+                      <small className="verdictWho">
+                        {meta?.name ?? focusStrategy}
+                      </small>
+                    </div>
+                    <div className="twoCol">
+                      <Stat
+                        label="Win probability"
+                        value={pct(edge.win_probability * 100)}
+                      />
+                      <Stat
+                        label="Net edge"
+                        value={`${edge.net_edge_pct >= 0 ? "+" : ""}${edge.net_edge_pct.toFixed(3)}%`}
+                      />
+                      <Stat
+                        label="Breakeven move"
+                        value={`${edge.breakeven_move_pct.toFixed(3)}%`}
+                      />
+                      <Stat
+                        label="Expected move"
+                        value={`${edge.expected_move_pct.toFixed(3)}%`}
+                      />
+                      <Stat
+                        label="Entry (bid)"
+                        value={money(edge.suggested_entry)}
+                      />
+                      <Stat
+                        label="Target"
+                        value={
+                          edge.suggested_target
+                            ? money(edge.suggested_target)
+                            : "—"
+                        }
+                      />
+                      <Stat
+                        label="Stop"
+                        value={
+                          edge.suggested_stop ? money(edge.suggested_stop) : "—"
+                        }
+                      />
+                    </div>
+                    <small className="edgeNote">{edge.note}</small>
+                  </>
+                ) : (
+                  <em>Warming up…</em>
+                );
+              })()}
             </section>
 
             <section key="board" className="panel strategyBoard">
@@ -1356,6 +1409,12 @@ function App() {
               <button
                 className="linkButton"
                 onClick={async () => {
+                  if (
+                    !window.confirm(
+                      "Reset the paper account? All paper trades and P&L will be erased.",
+                    )
+                  )
+                    return;
                   await fetch(API + "/api/reset", { method: "POST" });
                   refresh(active);
                 }}

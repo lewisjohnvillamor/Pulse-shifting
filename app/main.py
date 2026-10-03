@@ -25,7 +25,8 @@ from .watchlist import Watchlist
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR.parent / "data"
 market = BinancePublicClient()
-broker = PaperBroker()
+broker = PaperBroker(path=DATA_DIR / "paper_account.json")
+broker.load()
 hub = MarketHub(market)
 watchlist = Watchlist(DATA_DIR / "watchlist.json")
 monitor = SignalMonitor(DATA_DIR / "monitor")
@@ -69,7 +70,8 @@ async def lifespan(app: FastAPI):
     await market.close()
 
 
-app = FastAPI(title="PulseShift", version="0.4.0", lifespan=lifespan)
+APP_VERSION = "0.5.0"
+app = FastAPI(title="PulseShift", version=APP_VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -172,11 +174,21 @@ def _market_payload(feed: SymbolFeed, snapshot: MarketSnapshot) -> dict:
         None if primary is None else _decision_obj(decision),
         fee_bps=broker.fee_bps,
     )
+    # One edge card per strategy so the UI can follow whichever strategy
+    # the user focuses (the top-level `edge` stays the baseline's).
+    edges = {
+        sid: edge_assessment(
+            candles, snapshot, _decision_obj(d), fee_bps=broker.fee_bps
+        )
+        for sid, d in decisions.items()
+        if d.get("action") != "ERROR"
+    }
     payload = {
         "market": snapshot.as_dict(),
         "decision": decision,
         "decisions": decisions,
         "edge": edge,
+        "edges": edges,
         "account": broker.snapshot(_price_map(), snapshot.symbol),
         "candles": candles[-120:],
         "strategies": [s["id"] for s in registry.describe()],
@@ -215,7 +227,7 @@ async def health():
     return {
         "ok": True,
         "mode": "paper",
-        "version": "0.4.0",
+        "version": APP_VERSION,
         "streams": {s: f.connected for s, f in hub.feeds.items()},
     }
 

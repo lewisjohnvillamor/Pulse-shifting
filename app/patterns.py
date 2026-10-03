@@ -81,7 +81,9 @@ def detect_patterns(candles: list[dict], lookback: int = 120) -> dict[str, Any]:
             if abs(p - price) / price < 0.002:
                 continue
             touches = sum(1 for _, q in pts if abs(q - p) / p < 0.006)
-            if touches >= 2 and all(abs(l["price"] - p) / p > 0.001 for l in levels):
+            if touches >= 2 and all(
+                abs(lvl["price"] - p) / p > 0.001 for lvl in levels
+            ):
                 levels.append(
                     {
                         "kind": kind,

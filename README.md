@@ -106,6 +106,20 @@ Future: DuckDB + Parquet recorder/replay
 
 The next major build should be **persistent market recording + deterministic replay + multi-strategy comparison**, so the same BTC session can be replayed through baseline, Jev, Laya, and experimental strategies.
 
+## Paper account and tests
+
+The paper account (cash, positions, trade history) is saved to
+`data/paper_account.json` after every trade and restored on startup, so a
+restart no longer wipes it. **Reset** in the Portfolio panel asks for
+confirmation before erasing it.
+
+The dashboard reconnects to the local API automatically; the header shows
+"Local API offline — reconnecting" until it does.
+
+```bash
+.venv/bin/pytest   # accounting, persistence, feature and search tests
+```
+
 ## Safety
 
 PulseShift is a research and simulation tool. The current build does **not** place real exchange orders. Keep paper and live broker layers physically separated and validate strategies out-of-sample before considering real-capital use.

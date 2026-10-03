@@ -49,12 +49,22 @@ async def _forward_recorder() -> None:
         await asyncio.sleep(3600)
 
 
+async def _warm_symbols() -> None:
+    try:
+        await market.list_symbols()
+    except Exception:
+        pass  # the first search will retry
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await asyncio.gather(*(hub.subscribe(symbol) for symbol in watchlist.symbols))
     recorder = asyncio.create_task(_forward_recorder())
+    # Warm the symbol list so the first search in the UI is instant.
+    warm = asyncio.create_task(_warm_symbols())
     yield
     recorder.cancel()
+    warm.cancel()
     await hub.stop_all()
     await market.close()
 

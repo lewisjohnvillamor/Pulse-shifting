@@ -1418,9 +1418,7 @@ td {
 }
 
 /* Trend portfolio panel */
-.trendPanel {
-  overflow: auto;
-}
+
 .trendExposure {
   font-size: 12px;
   font-weight: 650;
@@ -1480,9 +1478,7 @@ td {
 }
 
 /* Forward test panel */
-.forwardPanel {
-  overflow: auto;
-}
+
 .fwdStatus {
   font-size: 11px;
   font-weight: 650;
@@ -1515,4 +1511,91 @@ td {
 .fwdSpark .bench {
   stroke: #9ca3af;
   stroke-dasharray: 3 2;
+}
+
+/* --- v0.11: card padding + inner scroll fixes --- */
+/* Compact headers had zero top/left padding (an older
+   `.panelHeader.compact { padding: 0 0 14px }` outranked the uniform
+   header padding), so kickers hugged the card corner. */
+.panelHeader.compact {
+  padding: 12px 14px 8px;
+  border-bottom: 0;
+}
+/* Tables ignore padding under border-collapse, so they ran edge to edge.
+   Wrap them in a padded container that scrolls inside the card, keeping
+   the header fixed. */
+.panelScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.panelScroll .trendTable {
+  margin-bottom: 6px;
+}
+.panelScroll .trendNote {
+  padding-left: 0;
+  padding-right: 0;
+}
+.trendTable th {
+  position: sticky;
+  top: 0;
+  background: var(--surface, #fff);
+  border-bottom: 1px solid var(--line2, #eef2f7);
+  z-index: 1;
+}
+.trendTable td {
+  border-bottom: 1px solid var(--line2, #f3f4f6);
+}
+.trendTable td:first-child,
+.trendTable th:first-child {
+  padding-left: 0;
+}
+.trendTable td:last-child,
+.trendTable th:last-child {
+  padding-right: 0;
+  text-align: right;
+}
+.trendNote {
+  line-height: 1.45;
+}
+.pickerResults button.linkButton {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #2563eb;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+.pickerError {
+  color: #b45309;
+}
+/* These three panels carried their own 16px padding on top of the
+   uniform 14px child padding, so their content sat ~30px in. */
+.intelligence,
+.portfolio,
+.execution {
+  padding: 0 0 10px;
+}
+/* Content taller than a card scrolls instead of being clipped
+   (e.g. "Close full position" in Paper execution). */
+.layout .panel:not(.chartPanel):not(.overview) {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.monitorPanel > em {
+  font-size: 12px;
+  font-style: normal;
+  color: var(--muted, #6b7280);
+}
+/* Inputs/buttons placed directly in a card need side margins, not the
+   uniform child padding (which pads their inside). */
+.layout .panel.execution > input,
+.layout .panel.execution > button {
+  margin-left: 14px;
+  margin-right: 14px;
+  width: calc(100% - 28px);
+  padding-left: 11px;
+  padding-right: 11px;
 }

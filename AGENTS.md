@@ -100,5 +100,9 @@ cd web && npm run build                # tsc -b && vite build
   (env vars / root `.env`; template in `.env.example`). The UI reads
   `VITE_API_URL` from the same file. There are no secrets in the repo;
   BYO AI keys live only in `data/config.json`.
+- User-facing docs: `README.md` (guide, screenshots in `docs/images/`),
+  `docs/RESEARCH.md` (methodology + results). Runnable examples live in
+  `examples/` (strategy template, API client, walk-forward, AI server);
+  keep them working when APIs change.
 - Don't commit `data/`, `.env`, `.venv/`, `node_modules/`, or anything
   containing credentials.

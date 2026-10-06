@@ -60,7 +60,9 @@ def test_forward_tracker_matches_backtest_accounting(tmp_path, monkeypatch):
     # Pretend "now" is far in the future so every candle counts as closed.
     monkeypatch.setattr(forward.time, "time", lambda: 4e9)
     for d in days[-40:]:
-        tracker.record_trend({s: [c for c in v if c["open_time"] <= d] for s, v in hist.items()})
+        tracker.record_trend(
+            {s: [c for c in v if c["open_time"] <= d] for s, v in hist.items()}
+        )
     # Recording the same day again is a no-op.
     assert tracker.record_trend(hist) is None
 

@@ -842,6 +842,9 @@ function App() {
             rowHeight={44}
             margin={[14, 14]}
             draggableHandle=".panelHeader"
+            // Controls inside a header (Run, Discover, timeframe/indicator
+            // buttons, selects) must click, not start a panel drag.
+            draggableCancel="button, select, input, textarea, a, label, .noDrag"
             onLayoutChange={(l: Layout[]) => {
               setLayout(l);
               localStorage.setItem("pulseshift-layout", JSON.stringify(l));

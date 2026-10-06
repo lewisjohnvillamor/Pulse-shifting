@@ -106,6 +106,16 @@ Future: DuckDB + Parquet recorder/replay
 
 The next major build should be **persistent market recording + deterministic replay + multi-strategy comparison**, so the same BTC session can be replayed through baseline, Jev, Laya, and experimental strategies.
 
+## Configuration (`.env`)
+
+Copy `.env.example` to `.env` to change hosts, ports, the data directory or
+the Laya adapter URL. The Python API (`app/settings.py`) and the Vite UI
+read the same root `.env`. **There are no secrets in this project**: market
+data comes from Binance public endpoints with no credentials. AI-provider
+keys you add through the settings gear are stored in `data/config.json`,
+which is gitignored and masked by `/api/config`. Never commit `.env` or
+`data/`.
+
 ## Paper account and tests
 
 The paper account (cash, positions, trade history) is saved to

@@ -19,11 +19,11 @@ from .paper import PaperBroker
 from .patterns import detect_patterns
 from .config import AppConfig
 from .registry import StrategyRegistry
+from .settings import CORS_ORIGINS, DATA_DIR, HOST, PORT
 from .signals import edge_assessment
 from .watchlist import Watchlist
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR.parent / "data"
 market = BinancePublicClient()
 broker = PaperBroker(path=DATA_DIR / "paper_account.json")
 broker.load()
@@ -75,7 +75,7 @@ app = FastAPI(title="PulseShift", version=APP_VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -667,4 +667,4 @@ async def backtest(
 
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("app.main:app", host=HOST, port=PORT, reload=False)

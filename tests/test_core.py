@@ -77,12 +77,16 @@ def test_broker_persists_and_reloads(tmp_path):
     b.buy("ETHUSDT", 500.0, 2000.0)
     b.buy("ETHUSDT", 500.0, 2500.0)
     saved = json.loads(path.read_text())
-    assert saved["positions"]["ETHUSDT"]["qty"] == pytest.approx(b.position_qty("ETHUSDT"))
+    assert saved["positions"]["ETHUSDT"]["qty"] == pytest.approx(
+        b.position_qty("ETHUSDT")
+    )
 
     b2 = PaperBroker(path=path)
     assert b2.load() is True
     assert b2.cash == pytest.approx(b.cash)
-    assert b2.position("ETHUSDT").entry_price == pytest.approx(b.position("ETHUSDT").entry_price)
+    assert b2.position("ETHUSDT").entry_price == pytest.approx(
+        b.position("ETHUSDT").entry_price
+    )
     assert len(b2.trades) == 2
 
     b2.reset()
@@ -151,7 +155,9 @@ def test_ai_client_does_not_call_network_while_offline(tmp_path, monkeypatch):
 
     calls = []
     monkeypatch.setattr(
-        ai.urllib.request, "urlopen", lambda *a, **k: calls.append(1) or (_ for _ in ()).throw(OSError())
+        ai.urllib.request,
+        "urlopen",
+        lambda *a, **k: calls.append(1) or (_ for _ in ()).throw(OSError()),
     )
     assert client.decide({"closes": [1.0]}) is None
     assert calls == []  # cooldown short-circuited before any network call

@@ -8,6 +8,10 @@ an id, appear in the Strategy board, the params editor (if they expose
 **Trust note:** `.py` plugins run with full Python privileges — only install
 code you trust or have reviewed.
 
+A fully commented Python template lives in
+[`examples/strategies/rsi_dip.py`](../examples/strategies/rsi_dip.py): copy it
+here and edit `decide()`.
+
 ## JSON strategy (no code)
 
 Reuse a builtin template (`ema_momentum`, `mean_reversion`, `breakout`) with

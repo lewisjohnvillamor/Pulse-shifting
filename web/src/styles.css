@@ -1614,3 +1614,18 @@ td {
   opacity: 0.75;
   margin-top: 2px;
 }
+/* The chart fills its wrapper. An early `.chart { height: 430px }` won
+   over `inset: 0`, so in smaller cards (the "All" multi view) the chart
+   spilled out below the card. */
+.chartWrap .chart {
+  height: auto;
+}
+/* Inside scrolling panels the wrapper has no flex height to fill. */
+.arena .chartWrap {
+  flex: none;
+  height: 380px;
+}
+.multiCell .chartWrap {
+  flex: none;
+  height: 260px;
+}

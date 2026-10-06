@@ -324,3 +324,8 @@ daily signals are logged for all 38 coins and scored in two groups:
 - the 6 training coins, expected IC +0.093;
 - the 32 others, expected IC +0.044 (positive for 21/32 on the same
   unseen period).
+
+## License
+
+MIT — see [LICENSE](LICENSE). This is research software for paper trading
+only; it is provided as is, with no warranty and no financial advice.

@@ -96,5 +96,9 @@ cd web && npm run build                # tsc -b && vite build
   Chart component.
 - The UI dashboard is a `react-grid-layout` grid; panel layout, pinned
   symbols, and the active tab persist in `localStorage`.
-- Don't commit `data/`, `.venv/`, `node_modules/`, or anything containing
-  credentials.
+- Hosts, ports, CORS origins and the data dir come from `app/settings.py`
+  (env vars / root `.env`; template in `.env.example`). The UI reads
+  `VITE_API_URL` from the same file. There are no secrets in the repo;
+  BYO AI keys live only in `data/config.json`.
+- Don't commit `data/`, `.env`, `.venv/`, `node_modules/`, or anything
+  containing credentials.

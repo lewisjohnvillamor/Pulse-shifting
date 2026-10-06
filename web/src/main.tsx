@@ -91,7 +91,12 @@ type SymbolResult = {
   pinned: boolean;
 };
 
-const API = "http://127.0.0.1:8000";
+// API base URL: set VITE_API_URL in the repo-root .env to override.
+const API = (
+  (import.meta.env.VITE_API_URL as string | undefined) ||
+  "http://127.0.0.1:8000"
+).replace(/\/$/, "");
+const WS_API = API.replace(/^http/, "ws");
 const money = (n: number) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -342,7 +347,7 @@ function App() {
     let attempt = 0;
     const connect = () => {
       if (disposed) return;
-      ws = new WebSocket(`ws://127.0.0.1:8000/ws/market?symbol=${active}`);
+      ws = new WebSocket(`${WS_API}/ws/market?symbol=${active}`);
       ws.onopen = () => {
         attempt = 0;
         setApiLink("live");

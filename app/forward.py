@@ -308,13 +308,19 @@ async def record_now(market, registry, extra_symbols: list[str] = ()) -> dict:
 
 async def report_now(market) -> dict:
     tracker = ForwardTracker()
-    closes: dict[str, dict[str, float]] = {}
-    for sym in AI_SYMBOLS:
+
+    async def daily(sym: str) -> tuple[str, list[dict]]:
         try:
-            candles = closed(await market.klines(sym, interval="1d", limit=1000))
+            return sym, closed(await market.klines(sym, interval="1d", limit=1000))
         except Exception:
-            candles = []
-        closes[sym] = {_day(int(c["open_time"])): float(c["close"]) for c in candles}
+            return sym, []
+
+    # Fetch all coins concurrently: sequentially this took ~11 s cold.
+    fetched = await asyncio.gather(*(daily(s) for s in AI_SYMBOLS))
+    closes = {
+        sym: {_day(int(c["open_time"])): float(c["close"]) for c in candles}
+        for sym, candles in fetched
+    }
     return {"trend": tracker.evaluate_trend(), "ai": tracker.evaluate_ai(closes)}
 
 
